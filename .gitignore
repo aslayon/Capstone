@@ -5,4 +5,4 @@
 .env
 
 # 민감한 데이터
-cctv_list.json
+cctv_list.*
