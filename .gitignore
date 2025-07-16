@@ -1,0 +1,8 @@
+# 가상환경
+.venv/
+
+# 환경 변수
+.env
+
+# 민감한 데이터
+cctv_list.json
