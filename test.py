@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 
 def main():
-    stream_url = "http://cctvsec.ktict.co.kr/200/0OxHL9J4G+qhvlI+7QupnfbSm9595SR3rHbBmM1exXuQ6D1RG8VIIhMgpf3636IWIHgSumIIwIa/IpdCeMP6ENJdJ6IawGezWXK1+KZl/gQ="  # 실제 CCTV 주소로 교체
+    stream_url = "##"  # 실제 CCTV 주소로 교체
     cap = cv2.VideoCapture(stream_url)
     tracker = MultiTracker()
 
