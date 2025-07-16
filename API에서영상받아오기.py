@@ -1,9 +1,10 @@
 import requests
 import pandas as pd
+import os
 
 url = "https://openapi.its.go.kr:9443/cctvInfo"
 params = {
-    "apiKey": "83b405ae143b49da85d1d998563492b9",  # 여기에 본인의 키 입력
+    "apiKey": os.getenv("ITS_API_KEY"),  # 여기에 본인의 키 입력
     "type": "all",
     "cctvType": "1",
     "minX": "126.8",
@@ -35,5 +36,3 @@ else:
 
 
 
-
-#83b405ae143b49da85d1d998563492b9

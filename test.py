@@ -2,10 +2,10 @@ import cv2
 from detector.yolo_detector import get_vehicle_detections
 from tracker.tracker_test import MultiTracker
 import matplotlib.pyplot as plt
-
+import os
 
 def main():
-    stream_url = "http://cctvsec.ktict.co.kr/200/0OxHL9J4G+qhvlI+7QupnfbSm9595SR3rHbBmM1exXuQ6D1RG8VIIhMgpf3636IWIHgSumIIwIa/IpdCeMP6ENJdJ6IawGezWXK1+KZl/gQ="  # 실제 CCTV 주소로 교체
+    stream_url =  os.getenv("ITS_BASE_URL")
     cap = cv2.VideoCapture(stream_url)
     tracker = MultiTracker()
 
