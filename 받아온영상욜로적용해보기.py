@@ -5,9 +5,8 @@ import os
 # 모델 로드 (자동으로 CUDA로 로드됨)
 model = YOLO("yolov8s.pt")  # 또는 yolov8n.pt for speed
 
-
 # 스트리밍 프레임 불러오기
-stream_url =  os.getenv("ITS_BASE_URL")
+stream_url = os.getenv("ITS_BASE_URL")  # 실제 CCTV URL
 cap = cv2.VideoCapture(stream_url)
 ret, frame = cap.read()
 cap.release()

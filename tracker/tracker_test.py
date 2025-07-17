@@ -72,6 +72,16 @@ class Track:
         x1, y1, x2, y2 = self.get_bbox()
         return x1 <= x <= x2 and y1 <= y <= y2
 
+def check_boundary_event(bbox, frame_width, frame_height, margin=0.05):
+    x1, y1, x2, y2 = bbox
+    cx = (x1 + x2) / 2
+    cy = (y1 + y2) / 2
+
+    if (cx < frame_width * margin or cx > frame_width * (1 - margin) or
+        cy < frame_height * margin or cy > frame_height * (1 - margin)):
+        return True
+    return False
+
 
 class MultiTracker:
     def __init__(self, max_age=30, iou_threshold=0.3):
@@ -144,7 +154,11 @@ class MultiTracker:
         global selected_id
         for track in self.tracks:
             if track.contains_point(x, y):
-                selected_id = track.id
-                print(f"[INFO] 관심 차량 선택됨: ID={selected_id}")
+                if selected_id == track.id:
+                    selected_id = None
+                    print(f"[INFO] 관심 차량 해제됨.")
+                else:
+                    selected_id = track.id
+                    print(f"[INFO] 관심 차량 선택됨: ID={selected_id}")
                 return
         print("[INFO] 클릭한 위치에 차량이 없습니다.")
