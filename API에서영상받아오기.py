@@ -6,7 +6,7 @@ url = "https://openapi.its.go.kr:9443/cctvInfo"
 params = {
     "apiKey": os.getenv("ITS_API_KEY"),  # 여기에 본인의 키 입력
     "type": "all",
-    "cctvType": "1",
+    "cctvType": "5",
     "minX": "126.8",
     "maxX": "127.89",
     "minY": "34.9",
@@ -27,8 +27,8 @@ if "response" in data and "data" in data["response"]:
     df = df[["cctvname", "cctvurl", "coordx", "coordy", "cctvtype", "cctvformat"]]
 
     # 엑셀로 저장
-    df.to_excel("cctv_list.xlsx", index=False)
-    df.to_json("cctv_list.json", orient="records", force_ascii=False)  # JSON도 함께 저장
+    df.to_excel("cctv_list_5.xlsx", index=False)
+    df.to_json("cctv_list_5.json", orient="records", force_ascii=False)  # JSON도 함께 저장
     print("✅ CCTV 목록이 'cctv_list.xlsx' 파일로 저장되었습니다.")
 else:
     print("⚠️ CCTV 데이터가 없습니다. 응답 메시지:", data.get("resultMsg", "알 수 없음"))
