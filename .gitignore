@@ -4,6 +4,9 @@
 # 환경 변수
 .env
 
+.downloads/
+
+
 # 민감한 데이터 파일
 cctv_list.*
 *.xlsx
