@@ -1,163 +1,80 @@
-'''
-import os
-import json
 import requests
+import os
+import math
 import time
-import subprocess
+import hashlib
 from datetime import datetime
-from geopy.distance import geodesic
 
-SAVE_BASE = "downloads"
 TARGET_NAME = "지본교"
-RADIUS_KM = 2.0
-MAX_NEIGHBORS = 4
-CCTV_JSON_PATH = "cctv_list_5.json"
-REPEAT = 20  # 30초씩 20번 = 10분
-SLEEP_INTERVAL = 30
+NUM_NEIGHBORS = 5
+SAVE_DIR = "videos"
+CHECK_INTERVAL = 10  # 초
 
-def load_cctv_list(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+downloaded_urls = set()
 
-def find_adjacent_cctvs_by_distance(base_cctv, cctv_list, radius_km=2.0):
-    base_coord = (base_cctv["coordy"], base_cctv["coordx"])
-    candidates = []
-    for cctv in cctv_list:
-        if cctv["cctvname"] == base_cctv["cctvname"]:
-            continue
-        coord = (cctv["coordy"], cctv["coordx"])
-        dist = geodesic(base_coord, coord).km
-        if dist <= radius_km:
-            candidates.append((dist, cctv))
-    candidates.sort()
-    return [c[1] for c in candidates]
-
-def download_clip(name, url, output_path):
+def fetch_cctv_list():
+    url = "https://openapi.its.go.kr:9443/cctvInfo"
+    params = {
+        "apiKey": os.getenv("ITS_API_KEY"),
+        "type": "all",
+        "cctvType": "5",  # mp4
+        "minX": "126.8", "maxX": "127.89",
+        "minY": "34.9", "maxY": "35.1",
+        "getType": "json"
+    }
     try:
-        with requests.get(url, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(output_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        print(f"✅ 저장됨: {output_path}")
+        response = requests.get(url, params=params, timeout=5)
+        data = response.json()
+        return data["response"]["data"]
     except Exception as e:
-        print(f"⚠️ 다운로드 실패: {name} ({url}) - {e}")
+        print("⚠️ API 요청 실패:", e)
+        return []
 
-def main():
-    cctv_list = load_cctv_list(CCTV_JSON_PATH)
-    current = next((c for c in cctv_list if TARGET_NAME in c["cctvname"]), None)
-    if not current:
-        print(f"❌ 기준 CCTV '{TARGET_NAME}'를 찾을 수 없습니다.")
+def calc_dist(c1, c2):
+    return math.sqrt((c1["coordx"] - c2["coordx"])**2 + (c1["coordy"] - c2["coordy"])**2)
+
+def download_video(name, url):
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fname = hashlib.md5(url.encode()).hexdigest()[:8]
+    save_path = os.path.join(SAVE_DIR, name, f"{ts}_{fname}.mp4")
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    try:
+        r = requests.get(url, timeout=10)
+        with open(save_path, "wb") as f:
+            f.write(r.content)
+        print(f"✅ 저장 완료: {save_path}")
+    except Exception as e:
+        print(f"⚠️ 다운로드 실패 ({name}):", e)
+
+def main_loop():
+    global downloaded_urls
+
+    base_list = fetch_cctv_list()
+    target = next((c for c in base_list if TARGET_NAME in c["cctvname"]), None)
+    if not target:
+        print("⚠️ 지본교 CCTV 찾기 실패")
         return
 
-    nearby = find_adjacent_cctvs_by_distance(current, cctv_list, RADIUS_KM)
-    targets = [current] + nearby[:MAX_NEIGHBORS]
+    # 인접 CCTV 미리 고정
+    neighbors = sorted(base_list, key=lambda c: calc_dist(c, target))[:NUM_NEIGHBORS]
+    neighbor_names = set(c["cctvname"] for c in neighbors)
+    print("🎯 수집 대상 CCTV:", neighbor_names)
 
-    now_str = datetime.now().strftime("%Y%m%d_%H%M")
-    session_dir = os.path.join(SAVE_BASE, f"{TARGET_NAME}_{now_str}")
-    os.makedirs(session_dir, exist_ok=True)
+    while True:
+        print(f"\n🕒 {datetime.now().strftime('%H:%M:%S')} - 최신 영상 수집 중...")
+        cctvs = fetch_cctv_list()
+        for c in cctvs:
+            name, url = c["cctvname"], c["cctvurl"]
+            if name not in neighbor_names:
+                continue
+            if url in downloaded_urls:
+                print(f"⏩ 이미 받은 영상 (중복): {name}")
+                continue
+            downloaded_urls.add(url)
+            download_video(name, url)
 
-    for cctv in targets:
-        folder = os.path.join(session_dir, cctv["cctvname"].replace("/", "_"))
-        os.makedirs(folder, exist_ok=True)
-
-    print(f"[INFO] 다운로드 시작 (총 {REPEAT}회, {SLEEP_INTERVAL}초 간격)...")
-
-    for round in range(1, REPEAT + 1):
-        print(f"▶ 회차 {round}/{REPEAT}")
-        for cctv in targets:
-            name = cctv["cctvname"].replace("/", "_")
-            url = cctv["cctvurl"].replace("\/", "/")
-            folder = os.path.join(session_dir, name)
-            output_file = os.path.join(folder, f"clip_{round:02d}.mp4")
-            download_clip(name, url, output_file)
-        if round < REPEAT:
-            time.sleep(SLEEP_INTERVAL)
-
-    print(f"[DONE] 다운로드 완료: {session_dir}")
+        time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
-    main()
-
-'''
-
-import os
-import json
-import requests
-import cv2
-from datetime import datetime
-from geopy.distance import geodesic
-import time
-
-SAVE_BASE = "downloads"
-TARGET_NAME = "지본교"
-RADIUS_KM = 2.0
-MAX_NEIGHBORS = 4
-CCTV_JSON_PATH = "cctv_list_5.json"
-REPEAT = 600  # 10분 동안 1초 간격 = 600회
-SLEEP_INTERVAL = 1
-
-def load_cctv_list(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def find_adjacent_cctvs_by_distance(base_cctv, cctv_list, radius_km=2.0):
-    base_coord = (base_cctv["coordy"], base_cctv["coordx"])
-    candidates = []
-    for cctv in cctv_list:
-        if cctv["cctvname"] == base_cctv["cctvname"]:
-            continue
-        coord = (cctv["coordy"], cctv["coordx"])
-        dist = geodesic(base_coord, coord).km
-        if dist <= radius_km:
-            candidates.append((dist, cctv))
-    candidates.sort()
-    return [c[1] for c in candidates]
-
-def download_clip(name, url, output_path):
-    try:
-        with requests.get(url, stream=True, timeout=30) as r:
-            r.raise_for_status()
-            with open(output_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        size = os.path.getsize(output_path)
-        print(f"✅ 저장됨: {output_path} ({size} bytes)")
-    except Exception as e:
-        print(f"⚠️ 다운로드 실패: {name} ({url}) - {e}")
-
-def main():
-    cctv_list = load_cctv_list(CCTV_JSON_PATH)
-    current = next((c for c in cctv_list if TARGET_NAME in c["cctvname"]), None)
-    if not current:
-        print(f"❌ 기준 CCTV '{TARGET_NAME}'를 찾을 수 없습니다.")
-        return
-
-    nearby = find_adjacent_cctvs_by_distance(current, cctv_list, RADIUS_KM)
-    targets = [current] + nearby[:MAX_NEIGHBORS]
-
-    now_str = datetime.now().strftime("%Y%m%d_%H%M")
-    session_dir = os.path.join(SAVE_BASE, f"{TARGET_NAME}_{now_str}_1sec")
-    os.makedirs(session_dir, exist_ok=True)
-
-    for cctv in targets:
-        folder = os.path.join(session_dir, cctv["cctvname"].replace("/", "_"))
-        os.makedirs(folder, exist_ok=True)
-
-    print(f"[INFO] 1초 간격 다운로드 시작 (총 {REPEAT}회)...")
-
-    for round in range(1, REPEAT + 1):
-        print(f"▶ 회차 {round}/{REPEAT}")
-        for cctv in targets:
-            name = cctv["cctvname"].replace("/", "_")
-            url = cctv["cctvurl"].replace("\/", "/")
-            folder = os.path.join(session_dir, name)
-            output_file = os.path.join(folder, f"clip_{round:03d}.mp4")
-            download_clip(name, url, output_file)
-        if round < REPEAT:
-            time.sleep(SLEEP_INTERVAL)
-
-    print(f"[DONE] 다운로드 완료: {session_dir}")
-
-if __name__ == "__main__":
-    main()
+    main_loop()

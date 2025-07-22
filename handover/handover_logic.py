@@ -1,7 +1,7 @@
 import json
 from geopy.distance import geodesic
 
-def load_cctv_list(path="cctv_list.json"):
+def load_cctv_list(path="cctv_list_4.json"):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
