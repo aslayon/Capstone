@@ -5,6 +5,9 @@ from detector.yolo_detector import get_vehicle_detections
 from tracker.tracker_test import MultiTracker
 from handover.handover_logic import load_cctv_list
 from dotenv import load_dotenv
+from handover.handover_detector import HandoverDetector
+from handover.handover_logic import find_adjacent_cctvs
+
 
 tracker = MultiTracker()
 
