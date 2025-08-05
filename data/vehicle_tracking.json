@@ -1,0 +1,22 @@
+{
+  "current_vehicles": {
+    "A123": {
+      "last_camera": "[남해선] 죽평",
+      "last_position": {
+        "x": 450,
+        "y": 300,
+        "w": 80,
+        "h": 60
+      },
+      "last_timestamp": "2025-08-05T18:47:16.284313",
+      "vehicle_class": "sedan",
+      "status": "tracking",
+      "handover_info": {
+        "active": false,
+        "source_camera": null,
+        "target_camera": null,
+        "start_time": null
+      }
+    }
+  }
+}

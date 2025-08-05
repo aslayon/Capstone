@@ -1,0 +1,54 @@
+[
+  {
+    "cctvname": "[남해선] 죽평",
+    "connections": [
+      {
+        "direction": "south",
+        "target": "[남해선] 서순천"
+      },
+      {
+        "direction": "north",
+        "target": "[남해선] 선평교"
+      }
+    ]
+  },
+  {
+    "cctvname": "[남해선] 선평교",
+    "connections": [
+      {
+        "direction": "south",
+        "target": "[남해선] 지본교"
+      },
+      {
+        "direction": "north",
+        "target": "[남해선] 죽평"
+      }
+    ]
+  },
+  {
+    "cctvname": "[남해선] 지본교",
+    "connections": [
+      {
+        "direction": "south",
+        "target": "[남해선] 선평교"
+      },
+      {
+        "direction": "north",
+        "target": "[남해선] 순천"
+      }
+    ]
+  },
+  {
+    "cctvname": "[남해선] 순천",
+    "connections": [
+      {
+        "direction": "south",
+        "target": "[남해선] 압곡"
+      },
+      {
+        "direction": "north",
+        "target": "[남해선] 지본교"
+      }
+    ]
+  }
+]

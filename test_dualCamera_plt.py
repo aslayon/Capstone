@@ -1,9 +1,11 @@
 """
-matplotlib 기반 부드러운 듀얼카메라
-파일명: test_matplotlib_dual.py
+핸드오버 시스템 통합 메인 스크립트 (디버깅 포함)
+파일명: main_handover_system.py
 
-test.py의 matplotlib 방식을 사용한 듀얼카메라
+기존 test_dualCamera_plt.py를 기반으로 새로운 핸드오버 시스템 통합
+bbox 좌표 문제 디버깅 기능 포함
 """
+
 import cv2
 import os
 import time
@@ -11,480 +13,581 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
-from detector.yolo_detector import get_vehicle_detections
-from tracker.tracker_test import MultiTracker, check_boundary_event
-from handover.handover_logic import load_cctv_list
-from reid.feature_extractor import ReIDSystem
 from dotenv import load_dotenv
 
-class MatplotlibDualCameraSystem:
-    """matplotlib 기반 부드러운 듀얼카메라"""
+# 우리가 만든 모듈들 import
+from core.data_manager import DataManager
+from handover.frame_concatenator import FrameConcatenator, BBoxSeparator
+from handover.coordinate_transformer import CoordinateTransformer
+from handover.handover_manager import HandoverManager, HandoverState
+from ui.simple_handover_ui import SimpleHandoverUI, UIMode
+
+# 기존 모듈들 import
+from detector.yolo_detector import get_vehicle_detections
+from tracker.tracker_test import MultiTracker, check_boundary_event
+from reid.feature_extractor import ReIDSystem
+
+class IntegratedHandoverSystem:
+    """통합 핸드오버 시스템 (디버깅 포함)"""
     
     def __init__(self):
-        # 한글 폰트 경고 해결
-        import matplotlib
-        matplotlib.rcParams['font.family'] = ['DejaVu Sans', 'Arial', 'sans-serif']
-        import warnings
-        warnings.filterwarnings("ignore", message="Glyph .* missing from font")
+        print("🚀 통합 핸드오버 시스템 초기화 중...")
         
-        # 기본 시스템 (test.py와 동일)
+        # === 우리가 만든 새로운 모듈들 ===
+        self.data_manager = DataManager()
+        self.frame_concatenator = FrameConcatenator()
+        self.bbox_separator = BBoxSeparator()
+        self.coord_transformer = CoordinateTransformer()
+        self.handover_manager = HandoverManager(self.data_manager)
+        self.ui_system = SimpleHandoverUI()
+        
+        # === 기존 시스템들 ===
         self.tracker = MultiTracker()
         self.reid_system = ReIDSystem(similarity_threshold=0.7)
         
-        # 카메라 설정
+        # === 카메라 관리 ===
         self.current_cap = None
-        self.next_cap = None
-        self.dual_mode = False
-        
-        # CCTV 정보
-        self.cctv_list = load_cctv_list()
-        self.connections = self._load_connections()
+        self.secondary_cap = None
         self.current_cctv = None
-        self.next_cctv = None
+        self.secondary_cctv = None
         
-        # matplotlib 설정 (test.py와 동일)
-        plt.ion()  # interactive mode
+        # === matplotlib 설정 ===
+        plt.ion()
         self.fig = None
-        self.ax_current = None
-        self.ax_next = None
+        self.ax = None
         
-        # 성능 설정
-        self.detection_interval = 3  # 3프레임마다
+        # === 성능 설정 ===
+        self.detection_interval = 2  # 개선: 2프레임마다
         self.frame_counter = 0
         self.last_detections = []
         
-        # 선택된 객체 관리
-        self.selected_track_id = None
+        # === 상태 관리 ===
+        self.selected_vehicle_id = None
         self.reid_registered = set()
-        self.lost_tracks = {}
         
-        print("📊 matplotlib 기반 듀얼카메라 시스템 초기화")
-    
-    def _load_connections(self):
-        """연결 관계 로드"""
-        try:
-            with open("cctv_graph_connections.json", 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except:
-            return []
-    
-    def find_cctv_by_name(self, name):
-        """CCTV 찾기"""
-        for cctv in self.cctv_list:
-            if name in cctv["cctvname"]:
-                return cctv
-        return None
-    
-    def find_next_camera(self, direction):
-        """다음 카메라 찾기"""
-        if not self.current_cctv:
-            return None
+        # === 디버깅 설정 ===
+        self.debug_mode = False
         
-        current_name = self.current_cctv["cctvname"]
-        
-        for connection in self.connections:
-            if current_name == connection["cctvname"]:
-                for conn in connection["connections"]:
-                    if conn["direction"] == direction:
-                        return self.find_cctv_by_name(conn["target"])
-        return None
+        print("✅ 시스템 초기화 완료")
     
-    def start_with_camera(self, cctv_name, stream_url):
+    def apply_debug_mode(self):
+        """디버깅 모드 적용"""
+        print("🐛 디버깅 모드 활성화")
+        self.debug_mode = True
+        print("  - 상세한 좌표 로그 출력")
+        print("  - bbox 유효성 검사")
+        print("  - 클릭 이벤트 추적")
+    
+    def initialize_modules(self):
+        """모듈 간 연결 설정"""
+        # handover_manager에 필요한 모듈들 주입
+        self.handover_manager.frame_concatenator = self.frame_concatenator
+        self.handover_manager.bbox_separator = self.bbox_separator
+        self.handover_manager.coord_transformer = self.coord_transformer
+        self.handover_manager.initialize_modules()
+        
+        print("🔗 모듈 간 연결 완료")
+    
+    def setup_matplotlib(self):
+        """matplotlib 초기화"""
+        if self.fig:
+            plt.close(self.fig)
+        
+        self.fig = plt.figure(figsize=(16, 10))
+        self.ax = self.fig.add_subplot(111)
+        
+        # 클릭 이벤트 연결
+        self.fig.canvas.mpl_connect('button_press_event', self.on_click)
+        
+        print("📊 matplotlib 설정 완료")
+    
+    def start_camera(self, cctv_name: str, stream_url: str) -> bool:
         """카메라 시작"""
-        self.current_cctv = self.find_cctv_by_name(cctv_name)
+        print(f"📡 카메라 연결 시도: {cctv_name}")
+        
+        # 카메라 정보 찾기
+        camera_connections = self.data_manager.get_camera_connections()
+        self.current_cctv = None
+        
+        for cctv_info in camera_connections:
+            if cctv_name in cctv_info["cctvname"]:
+                self.current_cctv = cctv_info
+                break
+        
         if not self.current_cctv:
+            print(f"❌ 카메라 정보를 찾을 수 없음: {cctv_name}")
             return False
         
-        print(f"📡 카메라 연결: {cctv_name}")
+        # 카메라 연결
         self.current_cap = cv2.VideoCapture(stream_url)
-        
         if not self.current_cap.isOpened():
+            print("❌ 카메라 연결 실패")
             return False
         
         self.current_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
-        # matplotlib 초기화 (싱글 모드)
-        self.setup_matplotlib_single()
+        # UI를 단일 모드로 설정
+        self.ui_system.set_single_mode(self.current_cctv["cctvname"])
+        self.data_manager.set_ui_mode("single", self.current_cctv["cctvname"])
         
-        print(f"✅ 카메라 연결 성공")
+        print(f"✅ 카메라 연결 성공: {cctv_name}")
         return True
     
-    def setup_matplotlib_single(self):
-        """matplotlib 싱글 모드 설정"""
-        if self.fig:
-            plt.close(self.fig)
-        
-        self.fig = plt.figure(figsize=(12, 8))
-        self.ax_current = self.fig.add_subplot(111)
-        self.ax_next = None
-        
-        # 마우스 클릭 이벤트 연결 (test.py와 동일)
-        self.fig.canvas.mpl_connect('button_press_event', self.on_click)
-        
-        self.dual_mode = False
-        print("📊 matplotlib 싱글 모드 설정")
-    
-    def setup_matplotlib_dual(self):
-        """matplotlib 듀얼 모드 설정"""
-        if self.fig:
-            plt.close(self.fig)
-        
-        self.fig = plt.figure(figsize=(16, 8))
-        
-        # 좌우 분할
-        self.ax_current = self.fig.add_subplot(121)
-        self.ax_next = self.fig.add_subplot(122)
-        
-        self.ax_current.set_title("CURRENT CAMERA")
-        self.ax_next.set_title("NEXT CAMERA")
-        
-        # 마우스 클릭 이벤트
-        self.fig.canvas.mpl_connect('button_press_event', self.on_click)
-        
-        self.dual_mode = True
-        print("📊 matplotlib 듀얼 모드 설정")
-    
-    def activate_dual_mode(self, direction):
-        """듀얼 모드 활성화"""
-        if self.dual_mode:
-            return False
-        
-        next_cctv = self.find_next_camera(direction)
-        if not next_cctv:
-            print(f"❌ {direction} 방향 카메라 없음")
-            return False
-        
-        print(f"🔄 듀얼 모드 활성화: {direction}")
-        
-        # 다음 카메라 연결
-        stream_url = os.getenv("CURRENT_CCTV_URL", "")
-        self.next_cap = cv2.VideoCapture(stream_url)
-        
-        if not self.next_cap.isOpened():
-            print("❌ 다음 카메라 연결 실패")
-            return False
-        
-        self.next_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        self.next_cctv = next_cctv
-        
-        # matplotlib 듀얼 모드로 전환
-        self.setup_matplotlib_dual()
-        
-        print(f"✅ 듀얼 모드 시작")
-        return True
-    
-    def deactivate_dual_mode(self):
-        """듀얼 모드 비활성화"""
-        if not self.dual_mode:
-            return
-        
-        print("🛑 듀얼 모드 종료")
-        
-        if self.next_cap:
-            self.next_cap.release()
-            self.next_cap = None
-        
-        self.next_cctv = None
-        
-        # matplotlib 싱글 모드로 전환
-        self.setup_matplotlib_single()
-    
-    def get_frames(self):
+    def get_frames(self) -> tuple:
         """프레임 읽기"""
         current_frame = None
-        next_frame = None
+        secondary_frame = None
         
+        # 현재 카메라
         if self.current_cap:
             ret, current_frame = self.current_cap.read()
             if not ret:
                 current_frame = None
         
-        if self.dual_mode and self.next_cap:
-            ret, next_frame = self.next_cap.read()
+        # 보조 카메라 (듀얼 모드시)
+        if self.secondary_cap:
+            ret, secondary_frame = self.secondary_cap.read()
             if not ret:
-                next_frame = None
+                secondary_frame = None
         
-        return current_frame, next_frame
+        return current_frame, secondary_frame
     
-    def process_detections(self, frame):
-        """탐지 처리"""
+    def validate_bbox(self, bbox, frame_width, frame_height):
+        """bbox 좌표 유효성 검사"""
+        x1, y1, x2, y2 = bbox
+        
+        issues = []
+        
+        if x1 < 0: issues.append(f"x1({x1}) < 0")
+        if y1 < 0: issues.append(f"y1({y1}) < 0")
+        if x2 > frame_width: issues.append(f"x2({x2}) > width({frame_width})")
+        if y2 > frame_height: issues.append(f"y2({y2}) > height({frame_height})")
+        if x2 <= x1: issues.append(f"x2({x2}) <= x1({x1})")
+        if y2 <= y1: issues.append(f"y2({y2}) <= y1({y1})")
+        
+        return len(issues) == 0, issues
+    
+    def clip_bbox(self, bbox, frame_width, frame_height):
+        """bbox를 프레임 범위로 클리핑"""
+        x1, y1, x2, y2 = bbox
+        
+        x1 = max(0, min(x1, frame_width-1))
+        y1 = max(0, min(y1, frame_height-1))
+        x2 = max(x1+1, min(x2, frame_width))
+        y2 = max(y1+1, min(y2, frame_height))
+        
+        return [x1, y1, x2, y2]
+    
+    def process_detections(self, frame: np.ndarray) -> list:
+        """개선된 탐지 처리 (디버깅 포함)"""
         self.frame_counter += 1
         
-        # 3프레임마다만 YOLO
         if self.frame_counter % self.detection_interval == 0:
-            small_frame = cv2.resize(frame, (640, 480))
-            detections = get_vehicle_detections(small_frame, conf_threshold=0.3)
+            original_h, original_w = frame.shape[:2]
+            target_w, target_h = 800, 600
             
-            # 좌표 복원
+            if self.debug_mode:
+                print(f"🔍 원본 프레임 크기: {original_w}x{original_h}")
+                print(f"🔍 YOLO 입력 크기: {target_w}x{target_h}")
+            
+            # 리사이즈
+            small_frame = cv2.resize(frame, (target_w, target_h))
+            
+            # YOLO 탐지
+            detections = get_vehicle_detections(small_frame, conf_threshold=0.2)
+            
+            if self.debug_mode:
+                print(f"🔍 원본 detection 수: {len(detections) if detections else 0}")
+            
             if detections:
-                scale_x = frame.shape[1] / 640
-                scale_y = frame.shape[0] / 480
+                # 스케일 계산
+                scale_x = original_w / target_w
+                scale_y = original_h / target_h
+                
+                if self.debug_mode:
+                    print(f"🔍 스케일: x={scale_x:.3f}, y={scale_y:.3f}")
                 
                 self.last_detections = []
-                for det in detections:
+                for i, det in enumerate(detections):
                     if len(det) >= 4:
                         x1, y1, x2, y2 = det[:4]
-                        self.last_detections.append((
-                            int(x1 * scale_x), int(y1 * scale_y),
-                            int(x2 * scale_x), int(y2 * scale_y)
-                        ) + det[4:])
+                        conf = det[4] if len(det) > 4 else 0.5
+                        
+                        if self.debug_mode:
+                            print(f"🔍 Detection {i}: 원본({x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f})")
+                        
+                        # 좌표 복원
+                        scaled_x1 = int(x1 * scale_x)
+                        scaled_y1 = int(y1 * scale_y)
+                        scaled_x2 = int(x2 * scale_x)
+                        scaled_y2 = int(y2 * scale_y)
+                        
+                        if self.debug_mode:
+                            print(f"🔍 Detection {i}: 복원({scaled_x1},{scaled_y1},{scaled_x2},{scaled_y2})")
+                        
+                        # bbox 유효성 검사
+                        bbox = [scaled_x1, scaled_y1, scaled_x2, scaled_y2]
+                        is_valid, issues = self.validate_bbox(bbox, original_w, original_h)
+                        
+                        if not is_valid and self.debug_mode:
+                            print(f"⚠️ Detection {i}: 좌표 문제 - {issues}")
+                        
+                        # 클리핑
+                        clipped_bbox = self.clip_bbox(bbox, original_w, original_h)
+                        scaled_x1, scaled_y1, scaled_x2, scaled_y2 = clipped_bbox
+                        
+                        # 크기 필터링
+                        width = scaled_x2 - scaled_x1
+                        height = scaled_y2 - scaled_y1
+                        
+                        if self.debug_mode:
+                            print(f"🔍 Detection {i}: 최종({scaled_x1},{scaled_y1},{scaled_x2},{scaled_y2}) 크기({width}x{height})")
+                        
+                        if width > 20 and height > 20:
+                            self.last_detections.append((
+                                scaled_x1, scaled_y1, scaled_x2, scaled_y2, conf
+                            ))
+                            if self.debug_mode:
+                                print(f"✅ Detection {i}: 유효함")
+                        else:
+                            if self.debug_mode:
+                                print(f"❌ Detection {i}: 너무 작음")
             else:
                 self.last_detections = []
+                if self.debug_mode:
+                    print("🔍 탐지된 객체 없음")
         
         return self.last_detections
     
-    def on_track_selected(self, track_id, frame, bbox):
-        """트랙 선택 - ReID 등록"""
-        if track_id in self.reid_registered:
+    def process_handover_logic(self, current_frame: np.ndarray, tracks: list):
+        """핸드오버 로직 처리"""
+        if not tracks or not self.selected_vehicle_id:
             return
         
-        print(f"🎯 트랙 선택: ID{track_id}")
+        # 선택된 차량 찾기
+        selected_track = None
+        for track_data in tracks:
+            track_id = track_data[0]
+            if track_id == self.selected_vehicle_id:
+                selected_track = track_data
+                break
         
+        if not selected_track:
+            return
+        
+        track_id, x1, y1, x2, y2 = selected_track
+        bbox = [x1, y1, x2, y2]
+        
+        # 핸드오버 트리거 확인
+        if self.handover_manager.check_handover_trigger(
+            str(track_id), bbox, self.current_cctv["cctvname"]
+        ):
+            # 진행 방향 추정 (간단한 로직)
+            h, w = current_frame.shape[:2]
+            center_x = (x1 + x2) // 2
+            
+            if center_x < w // 3:
+                direction = "south"
+            elif center_x > 2 * w // 3:
+                direction = "north"
+            else:
+                return
+            
+            # 다음 카메라 찾기
+            next_camera_name = self.data_manager.get_next_camera(
+                self.current_cctv["cctvname"], direction
+            )
+            
+            if next_camera_name:
+                if self.debug_mode:
+                    print(f"🔄 핸드오버 시작: {direction} → {next_camera_name}")
+                self.start_handover(next_camera_name)
+    
+    def start_handover(self, next_camera_name: str):
+        """핸드오버 시작"""
+        # 핸드오버 매니저로 시작
+        success = self.handover_manager.start_handover(
+            str(self.selected_vehicle_id),
+            self.current_cctv["cctvname"],
+            next_camera_name
+        )
+        
+        if success:
+            # 보조 카메라 연결 (실제로는 같은 스트림, 테스트용)
+            stream_url = os.getenv("CURRENT_CCTV_URL", "")
+            self.secondary_cap = cv2.VideoCapture(stream_url)
+            
+            if self.secondary_cap.isOpened():
+                self.secondary_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                
+                # UI를 듀얼 모드로 전환
+                self.ui_system.set_dual_mode(
+                    self.current_cctv["cctvname"], 
+                    next_camera_name
+                )
+                
+                # 핸드오버 상태 업데이트
+                self.ui_system.update_handover_status(0.1, "핸드오버 시작", 0.0)
+    
+    def update_handover_state(self):
+        """핸드오버 상태 업데이트"""
+        if self.handover_manager.current_state == HandoverState.IDLE:
+            return
+        
+        # 핸드오버 매니저 상태 업데이트
+        handover_status = self.handover_manager.update_handover_state()
+        
+        # UI 상태 업데이트
+        if handover_status:
+            progress = handover_status.get("progress", 0.0)
+            message = handover_status.get("message", "")
+            elapsed = handover_status.get("elapsed_time", 0.0)
+            
+            self.ui_system.update_handover_status(progress, message, elapsed)
+            
+            # 핸드오버 완료시 단일 모드로 복귀
+            if handover_status.get("state") in ["success", "timeout"]:
+                self.end_handover()
+    
+    def end_handover(self):
+        """핸드오버 종료"""
+        if self.secondary_cap:
+            self.secondary_cap.release()
+            self.secondary_cap = None
+        
+        # UI를 단일 모드로 복귀
+        self.ui_system.set_single_mode(self.current_cctv["cctvname"])
+        
+        if self.debug_mode:
+            print("🛑 핸드오버 종료")
+    
+    def create_display_frame(self, current_frame: np.ndarray, secondary_frame: np.ndarray = None) -> np.ndarray:
+        """표시용 프레임 생성"""
+        frame_dict = {}
+        
+        if current_frame is not None:
+            frame_dict[self.current_cctv["cctvname"]] = current_frame
+        
+        if secondary_frame is not None and self.ui_system.secondary_camera:
+            frame_dict[self.ui_system.secondary_camera] = secondary_frame
+        
+        display_frame, transform_info = self.ui_system.create_display_frame(frame_dict)
+        
+        return display_frame
+    
+    def draw_tracks_on_matplotlib(self, display_frame: np.ndarray, tracks: list):
+        """matplotlib에 트랙 그리기 (디버깅 포함)"""
+        self.ax.clear()
+        
+        # 프레임 정보 출력
+        frame_h, frame_w = display_frame.shape[:2]
+        if self.debug_mode:
+            print(f"🖼️ 표시 프레임 크기: {frame_w}x{frame_h}")
+            print(f"🖼️ UI 모드: {self.ui_system.current_mode.value}")
+        
+        # 프레임 표시
+        frame_rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+        self.ax.imshow(frame_rgb)
+        
+        # 트랙 그리기 (단일 모드에서만, 듀얼 모드는 UI에서 처리)
+        if self.ui_system.current_mode == UIMode.SINGLE and tracks:
+            if self.debug_mode:
+                print(f"🎯 그릴 트랙 수: {len(tracks)}")
+            
+            for i, track_data in enumerate(tracks):
+                track_id, x1, y1, x2, y2 = track_data
+                width = x2 - x1
+                height = y2 - y1
+                
+                if self.debug_mode:
+                    print(f"🎯 트랙 {i} (ID{track_id}): ({x1},{y1},{x2},{y2}) 크기({width}x{height})")
+                
+                # 좌표 유효성 검사
+                if x1 < 0 or y1 < 0 or x2 > frame_w or y2 > frame_h:
+                    if self.debug_mode:
+                        print(f"⚠️ 트랙 {i}: 좌표가 프레임 범위를 벗어남!")
+                    
+                    # 클리핑
+                    x1 = max(0, x1)
+                    y1 = max(0, y1) 
+                    x2 = min(frame_w, x2)
+                    y2 = min(frame_h, y2)
+                    width = x2 - x1
+                    height = y2 - y1
+                    
+                    if self.debug_mode:
+                        print(f"🔧 트랙 {i}: 클리핑 후 ({x1},{y1},{x2},{y2})")
+                
+                # 색상 선택
+                if track_id == self.selected_vehicle_id:
+                    color = 'magenta'
+                    linewidth = 3
+                elif track_id in self.reid_registered:
+                    color = 'yellow'
+                    linewidth = 2
+                else:
+                    color = 'red'
+                    linewidth = 2
+                
+                # 사각형 그리기
+                try:
+                    rect = Rectangle((x1, y1), width, height,
+                                   linewidth=linewidth, edgecolor=color, facecolor='none')
+                    self.ax.add_patch(rect)
+                    
+                    if self.debug_mode:
+                        print(f"✅ 트랙 {i}: 사각형 그리기 성공")
+                    
+                    # 라벨
+                    label = f"ID{track_id}"
+                    if track_id == self.selected_vehicle_id:
+                        label += " [SELECTED]"
+                    
+                    # 라벨 위치도 확인
+                    label_y = max(10, y1-5)  # 화면 위쪽 경계 고려
+                    self.ax.text(x1, label_y, label, color=color, fontsize=10,
+                               bbox=dict(boxstyle="round,pad=0.2", facecolor='black', alpha=0.5))
+                    
+                except Exception as e:
+                    if self.debug_mode:
+                        print(f"❌ 트랙 {i}: 그리기 실패 - {e}")
+        
+        # 상태 정보
+        status_parts = []
+        status_parts.append(f"Frame: {self.frame_counter}")
+        status_parts.append(f"Mode: {self.ui_system.current_mode.value.upper()}")
+        status_parts.append(f"Size: {frame_w}x{frame_h}")
+        
+        if self.selected_vehicle_id:
+            status_parts.append(f"Selected: ID{self.selected_vehicle_id}")
+        
+        if self.handover_manager.current_state != HandoverState.IDLE:
+            status_parts.append(f"Handover: {self.handover_manager.current_state.value}")
+        
+        if self.debug_mode:
+            status_parts.append("DEBUG")
+        
+        self.fig.suptitle(" | ".join(status_parts), fontsize=12)
+        self.ax.axis('off')
+        
+        # matplotlib axes 범위 출력
+        if self.debug_mode:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            print(f"🖼️ matplotlib 범위: x({xlim[0]:.1f},{xlim[1]:.1f}) y({ylim[0]:.1f},{ylim[1]:.1f})")
+        
+        plt.pause(0.01)
+    
+    def on_click(self, event):
+        """마우스 클릭 이벤트 (디버깅 포함)"""
+        if not event.inaxes == self.ax:
+            if self.debug_mode:
+                print("🖱️ 클릭: axes 범위 밖")
+            return
+        
+        # 클릭 좌표
+        click_x, click_y = event.xdata, event.ydata
+        if click_x is None or click_y is None:
+            if self.debug_mode:
+                print("🖱️ 클릭: 좌표 없음")
+            return
+        
+        click_x, click_y = int(click_x), int(click_y)
+        if self.debug_mode:
+            print(f"🖱️ 클릭 좌표: ({click_x}, {click_y})")
+        
+        # 현재 표시 중인 프레임 크기
+        current_frame, _ = self.get_frames()
+        if current_frame is not None and self.debug_mode:
+            orig_h, orig_w = current_frame.shape[:2]
+            print(f"🖱️ 원본 프레임 크기: {orig_w}x{orig_h}")
+        
+        # UI 시스템으로 클릭 처리
+        click_result = self.ui_system.handle_click(click_x, click_y)
+        if self.debug_mode:
+            print(f"🖱️ UI 클릭 결과: {click_result}")
+        
+        if click_result["success"] and self.ui_system.current_mode == UIMode.SINGLE:
+            # 트랙 선택 시도
+            if self.debug_mode:
+                print(f"🖱️ 트랙 선택 시도: ({click_x}, {click_y})")
+            
+            try:
+                selected = self.tracker.select_track_by_point(click_x, click_y)
+                if self.debug_mode:
+                    print(f"🖱️ 트래커 선택 결과: {selected}")
+                
+                if selected:
+                    track_id = selected['id']
+                    bbox = selected['bbox']
+                    if self.debug_mode:
+                        print(f"🎯 선택된 트랙: ID{track_id}, bbox{bbox}")
+                    
+                    self.selected_vehicle_id = track_id
+                    self.data_manager.set_selected_vehicle(str(track_id))
+                    
+                    # ReID 등록
+                    if current_frame is not None:
+                        self.register_vehicle_for_reid(track_id, current_frame, bbox)
+                else:
+                    if self.debug_mode:
+                        print("🖱️ 선택된 트랙 없음")
+                        
+            except Exception as e:
+                if self.debug_mode:
+                    print(f"❌ 트랙 선택 오류: {e}")
+                    import traceback
+                    traceback.print_exc()
+    
+    def register_vehicle_for_reid(self, track_id: int, frame: np.ndarray, bbox: list):
+        """ReID를 위한 차량 등록"""
         x1, y1, x2, y2 = bbox
         h, w = frame.shape[:2]
         
+        # 경계 확인
         x1 = max(0, min(x1, w-1))
         y1 = max(0, min(y1, h-1))
         x2 = max(x1+1, min(x2, w))
         y2 = max(y1+1, min(y2, h))
         
+        if self.debug_mode:
+            print(f"🎯 ReID 등록: ID{track_id}, bbox({x1},{y1},{x2},{y2})")
+        
+        # 차량 이미지 추출
         vehicle_crop = frame[y1:y2, x1:x2]
         
         if vehicle_crop.size > 0:
+            # ReID 시스템에 등록
             self.reid_system.register_lost_vehicle(
                 track_id, vehicle_crop, bbox, 'car',
                 {'cctv': self.current_cctv['cctvname']}
             )
             
+            # 데이터 매니저에 차량 추가
+            self.data_manager.add_vehicle(
+                str(track_id),
+                self.current_cctv['cctvname'],
+                {"x": x1, "y": y1, "w": x2-x1, "h": y2-y1},
+                "car"
+            )
+            
             self.reid_registered.add(track_id)
-            self.selected_track_id = track_id
             print(f"✅ ID{track_id} ReID 등록 완료")
-    
-    def check_handover(self, frame):
-        """핸드오버 체크"""
-        bbox = self.tracker.get_selected_bbox()
-        if not bbox:
-            return
-        
-        h, w = frame.shape[:2]
-        
-        if check_boundary_event(bbox, w, h) and not self.dual_mode:
-            x1, y1, x2, y2 = bbox
-            center_x = (x1 + x2) // 2
-            
-            if center_x < w // 3:
-                direction = 'south'
-            elif center_x > 2 * w // 3:
-                direction = 'north'
-            else:
-                return
-            
-            self.activate_dual_mode(direction)
-    
-    def process_reid_if_needed(self, next_frame):
-        """필요시 ReID 처리"""
-        if not self.dual_mode or not next_frame is not None:
-            return []
-        
-        if not self.lost_tracks:
-            return []
-        
-        # 다음 카메라에서 탐지
-        small_next = cv2.resize(next_frame, (640, 480))
-        next_detections = get_vehicle_detections(small_next, conf_threshold=0.4)
-        
-        if not next_detections:
-            return []
-        
-        # ReID 검색
-        matches = self.reid_system.search_in_new_camera(
-            next_detections, next_frame,
-            self.next_cctv['cctvname'] if self.next_cctv else "Unknown"
-        )
-        
-        # 높은 유사도 매칭만 처리
-        good_matches = [m for m in matches if m['similarity'] > 0.8]
-        
-        for match in good_matches:
-            if match['lost_id'] in self.lost_tracks:
-                del self.lost_tracks[match['lost_id']]
-                print(f"🎯 ReID 매칭: ID{match['lost_id']}, 유사도 {match['similarity']:.3f}")
-        
-        return good_matches
-    
-    def draw_matplotlib_frame(self, current_frame, next_frame=None, tracks=None, reid_matches=None):
-        """matplotlib으로 프레임 그리기 (test.py 스타일)"""
-        
-        if self.dual_mode and next_frame is not None:
-            # 듀얼 모드: 좌우 분할
-            
-            # 현재 카메라
-            self.ax_current.clear()
-            current_rgb = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
-            self.ax_current.imshow(current_rgb)
-            self.ax_current.set_title(f"CURRENT: {self.current_cctv['cctvname'][:20]}")
-            self.ax_current.axis('off')
-            
-            # 트랙 그리기 (현재 카메라)
-            if tracks:
-                for track_id, x1, y1, x2, y2 in tracks:
-                    width = x2 - x1
-                    height = y2 - y1
-                    
-                    # 색상 선택
-                    if track_id == self.selected_track_id:
-                        color = 'magenta'
-                        linewidth = 3
-                    elif track_id in self.reid_registered:
-                        color = 'yellow'
-                        linewidth = 2
-                    else:
-                        color = 'red'
-                        linewidth = 2
-                    
-                    # 사각형 그리기
-                    rect = Rectangle((x1, y1), width, height, 
-                                   linewidth=linewidth, edgecolor=color, facecolor='none')
-                    self.ax_current.add_patch(rect)
-                    
-                    # 레이블
-                    label = f"ID{track_id}"
-                    if track_id == self.selected_track_id:
-                        label += " [SEL]"
-                    elif track_id in self.reid_registered:
-                        label += " [ReID]"
-                    
-                    self.ax_current.text(x1, y1-5, label, color=color, fontsize=8, 
-                                       bbox=dict(boxstyle="round,pad=0.2", facecolor='black', alpha=0.5))
-            
-            # 다음 카메라
-            self.ax_next.clear()
-            next_rgb = cv2.cvtColor(next_frame, cv2.COLOR_BGR2RGB)
-            self.ax_next.imshow(next_rgb)
-            self.ax_next.set_title(f"NEXT: {self.next_cctv['cctvname'][:20]}")
-            self.ax_next.axis('off')
-            
-            # ReID 매칭 표시
-            if reid_matches:
-                for i, match in enumerate(reid_matches):
-                    self.ax_next.text(10, 30 + i*20, 
-                                    f"Match: ID{match['lost_id']} ({match['similarity']:.2f})",
-                                    color='cyan', fontsize=10,
-                                    bbox=dict(boxstyle="round,pad=0.3", facecolor='black', alpha=0.7))
-            
         else:
-            # 싱글 모드 (test.py와 동일)
-            self.ax_current.clear()
-            frame_rgb = cv2.cvtColor(current_frame, cv2.COLOR_BGR2RGB)
-            self.ax_current.imshow(frame_rgb)
-            self.ax_current.set_title(f"Vehicle Tracking - Camera")  # 한글 제거
-            self.ax_current.axis('off')
-            
-            # 트랙 그리기 (test.py와 유사)
-            if tracks:
-                for track_id, x1, y1, x2, y2 in tracks:
-                    width = x2 - x1
-                    height = y2 - y1
-                    
-                    # 색상 선택
-                    if track_id == self.selected_track_id:
-                        color = 'magenta'
-                        linewidth = 3
-                    elif track_id in self.reid_registered:
-                        color = 'yellow'
-                        linewidth = 2
-                    else:
-                        color = 'red'
-                        linewidth = 2
-                    
-                    # 사각형 그리기 (test.py 스타일)
-                    rect = Rectangle((x1, y1), width, height, 
-                                   linewidth=linewidth, edgecolor=color, facecolor='none')
-                    self.ax_current.add_patch(rect)
-                    
-                    # ID 레이블
-                    label = f"ID {track_id}"
-                    if track_id == self.selected_track_id:
-                        label += " [SELECTED]"
-                    elif track_id in self.reid_registered:
-                        label += " [ReID]"
-                    
-                    self.ax_current.text(x1, y1-5, label, color=color, fontsize=10, 
-                                       bbox=dict(boxstyle="round,pad=0.2", facecolor='black', alpha=0.5))
-        
-        # 상태 정보 표시
-        status_text = f"Frame: {self.frame_counter}"
-        if self.dual_mode:
-            status_text += " | DUAL MODE"
-        if self.selected_track_id:
-            status_text += f" | Selected: ID{self.selected_track_id}"
-        if self.lost_tracks:
-            status_text += f" | Lost: {len(self.lost_tracks)}"
-        
-        self.fig.suptitle(status_text, fontsize=12)
-        
-        # test.py와 동일한 방식으로 업데이트
-        plt.pause(0.01)  # 핵심! test.py와 동일
-    
-    def on_click(self, event):
-        """마우스 클릭 이벤트 (test.py와 동일)"""
-        if event.inaxes == self.ax_current:  # 현재 카메라만 클릭 가능
-            x, y = int(event.xdata), int(event.ydata)
-            
-            # 트랙 선택 (test.py와 동일)
-            selected = self.tracker.select_track_by_point(x, y)
-            
-            if selected:
-                track_id = selected['id']
-                bbox = selected['bbox']
-                
-                # 현재 프레임에서 ReID 등록
-                current_frame, _ = self.get_frames()
-                if current_frame is not None:
-                    self.on_track_selected(track_id, current_frame, bbox)
-    
-    def update_tracker_with_events(self, detections):
-        """트래커 업데이트 및 이벤트 감지"""
-        # 기존 트랙 ID들 저장 (단순화)
-        old_track_ids = set()
-        
-        try:
-            # tracker_test.py의 MultiTracker 사용시
-            if hasattr(self.tracker, 'tracks'):
-                old_track_ids = {getattr(track, 'id', track) for track in self.tracker.tracks}
-        except:
-            # 안전한 대안
-            old_track_ids = set()
-        
-        # 트래커 업데이트 (test.py와 동일)
-        tracks = self.tracker.update(detections)
-        
-        # 현재 트랙 ID들
-        current_track_ids = {track_id for track_id, *_ in tracks}
-        
-        # 분실된 트랙 감지 (단순화)
-        lost_ids = old_track_ids - current_track_ids
-        
-        for lost_id in lost_ids:
-            if lost_id in self.reid_registered:
-                print(f"📉 등록된 트랙 분실: ID{lost_id}")
-                self.lost_tracks[lost_id] = time.time()
-                
-                # 듀얼 모드 자동 활성화
-                if not self.dual_mode:
-                    print("🔄 분실로 인한 듀얼 모드 활성화")
-                    self.activate_dual_mode('north')
-        
-        return tracks
+            if self.debug_mode:
+                print(f"❌ ID{track_id} ReID 등록 실패: 빈 이미지")
     
     def run(self):
-        """메인 실행 루프 (test.py 스타일)"""
-        print("\n📊 matplotlib 기반 듀얼카메라 시작!")
+        """메인 실행 루프"""
+        print("\n🚀 통합 핸드오버 시스템 시작!")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("사용법:")
-        print("  - 마우스 클릭: 차량 선택 (ReID 등록)")
-        print("  - 키보드 'd': 듀얼 모드 토글")
-        print("  - 키보드 'q': 종료")
-        print("  - 키보드 'h': 상태 정보")
+        print("  🖱️  마우스 클릭: 차량 선택 및 추적 시작")
+        print("  🔄  자동 핸드오버: 선택된 차량이 화면 경계 근처에 도달시")
+        print("  ⌨️  키보드 'q': 종료")
+        if self.debug_mode:
+            print("  🐛  디버깅 모드: 상세 로그 출력")
+        print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         
         frame_count = 0
         fps_start = time.time()
@@ -492,43 +595,48 @@ class MatplotlibDualCameraSystem:
         try:
             while True:
                 # 프레임 읽기
-                current_frame, next_frame = self.get_frames()
+                current_frame, secondary_frame = self.get_frames()
                 
                 if current_frame is None:
-                    print("❌ 프레임 읽기 실패")
+                    if self.debug_mode and frame_count % 100 == 0:  # 가끔만 출력
+                        print("❌ 프레임 읽기 실패")
                     time.sleep(0.01)
                     continue
                 
                 frame_count += 1
                 
-                # 탐지 처리 (간헐적)
+                # 프레임 등록 (핸드오버 매니저용)
+                self.handover_manager.update_frame(
+                    self.current_cctv["cctvname"], current_frame
+                )
+                
+                # 탐지 처리
                 detections = self.process_detections(current_frame)
                 
-                # 트래커 업데이트 (이벤트 포함)
-                tracks = self.update_tracker_with_events(detections)
+                # 트래커 업데이트
+                tracks = self.tracker.update(detections)
                 
-                # 핸드오버 체크
-                self.check_handover(current_frame)
+                # 핸드오버 로직 처리
+                self.process_handover_logic(current_frame, tracks)
                 
-                # ReID 처리 (필요시만)
-                reid_matches = []
-                if self.dual_mode and next_frame is not None and self.lost_tracks:
-                    reid_matches = self.process_reid_if_needed(next_frame)
+                # 핸드오버 상태 업데이트
+                self.update_handover_state()
                 
-                # matplotlib으로 그리기 (test.py와 동일한 방식)
-                self.draw_matplotlib_frame(current_frame, next_frame, tracks, reid_matches)
+                # 표시용 프레임 생성
+                display_frame = self.create_display_frame(current_frame, secondary_frame)
                 
-                # FPS 계산 (간헐적)
+                # matplotlib에 그리기
+                self.draw_tracks_on_matplotlib(display_frame, tracks)
+                
+                # FPS 계산
                 if frame_count % 30 == 0:
                     elapsed = time.time() - fps_start
                     fps = 30 / elapsed if elapsed > 0 else 0
-                    print(f"📊 FPS: {fps:.1f} | 프레임: {frame_count}")
+                    status_msg = f"📊 FPS: {fps:.1f} | 프레임: {frame_count} | 모드: {self.ui_system.current_mode.value}"
+                    if self.debug_mode:
+                        status_msg += f" | 탐지: {len(detections)} | 트랙: {len(tracks) if tracks else 0}"
+                    print(status_msg)
                     fps_start = time.time()
-                
-                # 키보드 입력 처리 (matplotlib 이벤트)
-                if plt.waitforbuttonpress(timeout=0.001):  # 1ms 타임아웃
-                    # 간단한 키 입력 처리는 제한적이므로 별도 처리 필요
-                    pass
         
         except KeyboardInterrupt:
             print("\n⌨️ 사용자 중단")
@@ -536,74 +644,68 @@ class MatplotlibDualCameraSystem:
             print(f"\n💥 오류 발생: {e}")
             import traceback
             traceback.print_exc()
-        
         finally:
             self.shutdown()
     
-    def run_with_keyboard_input(self):
-        """키보드 입력이 포함된 실행 루프"""
-        print("\n📊 matplotlib 듀얼카메라 (키보드 지원)")
-        print("matplotlib 창을 활성화한 후:")
-        print("  - 마우스 클릭: 차량 선택")
-        print("  - 터미널에서 명령어:")
-        print("    'd': 듀얼 모드 토글")
-        print("    'h': 상태 정보")
-        print("    'q': 종료")
-        
-        import threading
-        import sys
-        
-        # 키보드 입력 스레드
-        def keyboard_input():
-            while True:
-                try:
-                    cmd = input().strip().lower()
-                    if cmd == 'q':
-                        print("🛑 종료 명령")
-                        self.shutdown()
-                        break
-                    elif cmd == 'd':
-                        if self.dual_mode:
-                            self.deactivate_dual_mode()
-                        else:
-                            self.activate_dual_mode('north')
-                    elif cmd == 'h':
-                        print(f"\n📊 현재 상태:")
-                        print(f"  프레임: {self.frame_counter}")
-                        print(f"  듀얼 모드: {self.dual_mode}")
-                        print(f"  선택된 트랙: {self.selected_track_id}")
-                        print(f"  ReID 등록: {len(self.reid_registered)}")
-                        print(f"  분실 트랙: {len(self.lost_tracks)}")
-                except:
-                    break
-        
-        # 키보드 스레드 시작
-        keyboard_thread = threading.Thread(target=keyboard_input, daemon=True)
-        keyboard_thread.start()
-        
-        # 메인 루프 실행
-        self.run()
-    
     def shutdown(self):
-        """정리"""
+        """시스템 종료"""
         print("\n🛑 시스템 종료 중...")
         
         if self.current_cap:
             self.current_cap.release()
         
-        if self.next_cap:
-            self.next_cap.release()
+        if self.secondary_cap:
+            self.secondary_cap.release()
         
         if self.fig:
             plt.close(self.fig)
         
-        plt.ioff()  # interactive mode off
+        plt.ioff()
         
         print("✅ 시스템 종료 완료")
 
 
+
+
+
+
+
 def main():
     """메인 함수"""
+    load_dotenv()
+    
+    # 환경변수에서 설정 읽기
+    stream_url = os.getenv("CURRENT_CCTV_URL", "")
+    cctv_name = os.getenv("CURRENT_CCTV_NAME", "죽평")
+    
+    if not stream_url:
+        print("❌ CURRENT_CCTV_URL 환경변수가 설정되지 않았습니다.")
+        return
+    
+    print("🎬 통합 핸드오버 시스템")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(f"📹 카메라: {cctv_name}")
+    print(f"🔗 스트림: {stream_url[:50]}...")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    # 시스템 초기화
+    system = IntegratedHandoverSystem()
+    
+    # 디버깅 모드 활성화 (bbox 좌표 문제 해결용)
+    system.apply_debug_mode()  # 이 줄을 주석 처리하면 디버깅 끄기
+    
+    system.initialize_modules()
+    system.setup_matplotlib()
+    
+    # 카메라 시작
+    if system.start_camera(cctv_name, stream_url):
+        system.run()
+    else:
+        print("❌ 시스템 시작 실패")
+
+
+def main_without_debug():
+    """디버깅 없이 실행"""
     load_dotenv()
     
     stream_url = os.getenv("CURRENT_CCTV_URL", "")
@@ -613,17 +715,281 @@ def main():
         print("❌ CURRENT_CCTV_URL 환경변수가 설정되지 않았습니다.")
         return
     
+    print("🎬 통합 핸드오버 시스템 (일반 모드)")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f"📹 카메라: {cctv_name}")
     print(f"🔗 스트림: {stream_url[:50]}...")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    system = MatplotlibDualCameraSystem()
+    # 시스템 초기화 (디버깅 모드 없이)
+    system = IntegratedHandoverSystem()
+    system.initialize_modules()
+    system.setup_matplotlib()
     
-    if system.start_with_camera(cctv_name, stream_url):
-        # 키보드 입력 지원 버전으로 실행
-        system.run_with_keyboard_input()
+    # 카메라 시작
+    if system.start_camera(cctv_name, stream_url):
+        system.run()
     else:
         print("❌ 시스템 시작 실패")
 
 
 if __name__ == "__main__":
+    # 디버깅 모드로 실행
     main()
+    
+    # 일반 모드로 실행하려면 대신 이것 사용:
+    # main_without_debug()
+
+
+    # main_handover_system.py에 추가할 HLS 점프 분석 코드
+
+
+
+class HLSJumpDetector:
+    """HLS 세그먼트 점프 감지기"""
+    
+    def __init__(self, window_size=30):
+        self.frame_times = deque(maxlen=window_size)
+        self.jump_history = []
+        self.last_frame_time = None
+        self.frame_counter = 0
+        
+    def detect_jump(self, frame):
+        """프레임에서 점프 감지"""
+        current_time = time.time()
+        self.frame_counter += 1
+        
+        if self.last_frame_time is not None:
+            # 프레임 간 시간 간격
+            interval = current_time - self.last_frame_time
+            self.frame_times.append(interval)
+            
+            # 평균 프레임 간격 계산
+            if len(self.frame_times) > 10:
+                avg_interval = sum(self.frame_times) / len(self.frame_times)
+                
+                # 비정상적으로 긴 간격 감지 (점프)
+                if interval > avg_interval * 3:  # 평균의 3배 이상
+                    jump_info = {
+                        'frame_count': self.frame_counter,
+                        'time': current_time,
+                        'interval': interval,
+                        'avg_interval': avg_interval,
+                        'jump_size': interval - avg_interval
+                    }
+                    
+                    self.jump_history.append(jump_info)
+                    
+                    print(f"🔥 HLS 점프 감지!")
+                    print(f"  프레임: {self.frame_counter}")
+                    print(f"  간격: {interval:.3f}초 (평균: {avg_interval:.3f}초)")
+                    print(f"  점프 크기: {jump_info['jump_size']:.3f}초")
+                    
+                    return True
+        
+        self.last_frame_time = current_time
+        return False
+    
+    def get_jump_pattern(self):
+        """점프 패턴 분석"""
+        if len(self.jump_history) < 2:
+            return None
+        
+        # 점프 간 간격 계산
+        intervals = []
+        for i in range(1, len(self.jump_history)):
+            time_diff = self.jump_history[i]['time'] - self.jump_history[i-1]['time']
+            intervals.append(time_diff)
+        
+        if intervals:
+            avg_jump_interval = sum(intervals) / len(intervals)
+            print(f"📊 점프 패턴 분석:")
+            print(f"  총 점프 수: {len(self.jump_history)}")
+            print(f"  평균 점프 간격: {avg_jump_interval:.1f}초")
+            print(f"  점프 간격들: {[f'{i:.1f}s' for i in intervals[-5:]]}")  # 최근 5개
+            
+            return {
+                'total_jumps': len(self.jump_history),
+                'avg_interval': avg_jump_interval,
+                'recent_intervals': intervals[-5:]
+            }
+        
+        return None
+
+# IntegratedHandoverSystem 클래스에 추가할 메서드들
+def initialize_jump_detection(self):
+    """점프 감지기 초기화"""
+    self.jump_detector = HLSJumpDetector()
+    print("🔍 HLS 점프 감지기 활성화")
+
+def monitor_stream_continuity(self, frame):
+    """스트림 연속성 모니터링"""
+    if hasattr(self, 'jump_detector'):
+        jump_detected = self.jump_detector.detect_jump(frame)
+        
+        if jump_detected:
+            # 점프 발생시 대응
+            self.handle_stream_jump()
+            
+            # 패턴 분석 (10번째 점프마다)
+            if len(self.jump_detector.jump_history) % 10 == 0:
+                pattern = self.jump_detector.get_jump_pattern()
+                if pattern and pattern['avg_interval'] > 0:
+                    print(f"💡 예상 다음 점프: {pattern['avg_interval']:.1f}초 후")
+
+def handle_stream_jump(self):
+    """스트림 점프 발생시 처리"""
+    print("🔧 스트림 점프 처리 중...")
+    
+    # 1. 트래커 상태 유지 (중요!)
+    if hasattr(self, 'tracker') and self.selected_vehicle_id:
+        print(f"📌 선택된 차량 ID{self.selected_vehicle_id} 상태 보존")
+    
+    # 2. 캐시된 detection 초기화
+    self.last_detections = []
+    
+    # 3. 필요시 스트림 재연결 시도
+    if self.should_reconnect_stream():
+        self.reconnect_stream()
+
+def should_reconnect_stream(self):
+    """스트림 재연결 필요 여부 판단"""
+    if hasattr(self, 'jump_detector'):
+        # 최근 1분내 점프가 너무 많으면 재연결
+        recent_jumps = [j for j in self.jump_detector.jump_history 
+                       if time.time() - j['time'] < 60]
+        
+        if len(recent_jumps) > 10:  # 1분에 10번 이상 점프
+            print("⚠️ 과도한 점프 발생, 재연결 권장")
+            return True
+    
+    return False
+
+def reconnect_stream(self):
+    """스트림 재연결"""
+    print("🔄 스트림 재연결 시도...")
+    
+    if self.current_cap:
+        self.current_cap.release()
+        time.sleep(0.5)  # 짧은 대기
+        
+        # 재연결
+        stream_url = os.getenv("CURRENT_CCTV_URL", "")
+        self.current_cap = self.setup_camera_optimized(stream_url)
+        
+        if self.current_cap:
+            print("✅ 스트림 재연결 성공")
+            return True
+        else:
+            print("❌ 스트림 재연결 실패")
+            return False
+
+def setup_camera_optimized(self, stream_url: str):
+    """HLS 최적화된 카메라 설정"""
+    cap = cv2.VideoCapture(stream_url)
+    
+    if not cap.isOpened():
+        return None
+    
+    # HLS 점프 최소화 설정
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)     # 최소 버퍼로 지연 최소화
+    cap.set(cv2.CAP_PROP_FPS, 25)          # 안정적인 FPS
+    
+    # 추가 안정성 옵션
+    try:
+        # 자동 재연결 허용
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+    except:
+        pass
+    
+    return cap
+
+# 메인 실행 루프에서 사용
+def run_with_jump_monitoring(self):
+    """점프 모니터링이 포함된 실행 루프"""
+    
+    # 점프 감지기 초기화
+    self.initialize_jump_detection()
+    
+    print("\n🚀 HLS 점프 모니터링 포함 실행!")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    frame_count = 0
+    fps_start = time.time()
+    
+    try:
+        while True:
+            current_frame, secondary_frame = self.get_frames()
+            
+            if current_frame is None:
+                time.sleep(0.01)
+                continue
+            
+            frame_count += 1
+            
+            # HLS 점프 모니터링 (핵심!)
+            self.monitor_stream_continuity(current_frame)
+            
+            # 나머지 처리는 기존과 동일
+            self.handover_manager.update_frame(
+                self.current_cctv["cctvname"], current_frame
+            )
+            
+            detections = self.process_detections(current_frame)
+            tracks = self.tracker.update(detections)
+            
+            self.process_handover_logic(current_frame, tracks)
+            self.update_handover_state()
+            
+            display_frame = self.create_display_frame(current_frame, secondary_frame)
+            self.draw_tracks_on_matplotlib(display_frame, tracks)
+            
+            # FPS 및 점프 통계
+            if frame_count % 30 == 0:
+                elapsed = time.time() - fps_start
+                fps = 30 / elapsed if elapsed > 0 else 0
+                
+                jump_count = len(self.jump_detector.jump_history) if hasattr(self, 'jump_detector') else 0
+                print(f"📊 FPS: {fps:.1f} | 프레임: {frame_count} | 점프: {jump_count}회")
+                
+                fps_start = time.time()
+    
+    except KeyboardInterrupt:
+        print("\n⌨️ 사용자 중단")
+        
+        # 최종 점프 패턴 분석
+        if hasattr(self, 'jump_detector'):
+            final_pattern = self.jump_detector.get_jump_pattern()
+            if final_pattern:
+                print(f"\n📈 최종 점프 분석:")
+                print(f"  전체 실행 중 {final_pattern['total_jumps']}회 점프 발생")
+                print(f"  평균 {final_pattern['avg_interval']:.1f}초 간격")
+    
+    finally:
+        self.shutdown()
+
+# 사용법: main 함수에서
+def main_with_jump_detection():
+    """점프 감지 포함 실행"""
+    load_dotenv()
+    
+    stream_url = os.getenv("CURRENT_CCTV_URL", "")
+    cctv_name = os.getenv("CURRENT_CCTV_NAME", "죽평")
+    
+    if not stream_url:
+        print("❌ CURRENT_CCTV_URL 환경변수가 설정되지 않았습니다.")
+        return
+    
+    system = IntegratedHandoverSystem()
+    system.apply_debug_mode()
+    system.initialize_modules()
+    system.setup_matplotlib()
+    
+    if system.start_camera(cctv_name, stream_url):
+        system.run_with_jump_monitoring()  # 점프 모니터링 포함 실행
+    else:
+        print("❌ 시스템 시작 실패")
+
+if __name__ == "__main__":
+    main_with_jump_detection()  # 점프 분석 버전으로 실행

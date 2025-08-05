@@ -1,0 +1,12 @@
+{
+  "active_handovers": {
+    "session_20250805_184716_A123": {
+      "vehicle_id": "A123",
+      "source_camera": "[남해선] 죽평",
+      "target_camera": "[남해선] 선평교",
+      "start_time": "2025-08-05T18:47:16.294384",
+      "status": "searching",
+      "ui_mode": "dual"
+    }
+  }
+}
