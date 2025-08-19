@@ -11,20 +11,23 @@ class UIMode(Enum):
 class SimpleHandoverUI:
     """간소화된 핸드오버 UI 시스템"""
     
-    def __init__(self, display_width=1920, display_height=1080):
-        self.display_width = display_width
-        self.display_height = display_height
+    def __init__(self):
+    # 720x480 기준으로 변경
+        self.single_width = 720
+        self.single_height = 480
+        self.dual_width = 1440  # 720 * 2
+        self.dual_height = 480
         
-        # UI 상태
+        # 표시용 크기 (2배 확대)
+        self.display_single_width = 1440
+        self.display_single_height = 960
+        self.display_dual_width = 1440
+        self.display_dual_height = 480
+        
+        # 나머지는 그대로...
         self.current_mode = UIMode.SINGLE
         self.primary_camera = None
         self.secondary_camera = None
-        
-        # 핸드오버 상태
-        self.handover_active = False
-        self.handover_progress = 0.0
-        self.handover_message = ""
-        self.handover_time = 0.0
     
     def set_single_mode(self, camera_name: str):
         """단일 카메라 모드로 전환"""

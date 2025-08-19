@@ -81,7 +81,7 @@ def main():
     system.setup_matplotlib()
     
     # 디버깅 모드 (선택사항)
-    # system.apply_debug_mode()
+    system.apply_debug_mode()
     
     # 4. 스트림 시작
     print("[4/4] 스트림 시작...")

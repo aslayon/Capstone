@@ -57,7 +57,7 @@ class IntegratedHandoverSystem:
         self.ax = None
         
         # === 성능 설정 ===
-        self.detection_interval = 2  # 개선: 2프레임마다
+        self.detection_interval = 2  # 개선: 1프레임마다          ########################################## 성능
         self.frame_counter = 0
         self.last_detections = []
         
@@ -89,17 +89,18 @@ class IntegratedHandoverSystem:
         print("🔗 모듈 간 연결 완료")
     
     def setup_matplotlib(self):
-        """matplotlib 초기화"""
+        """matplotlib 초기화 - 720x480 비율"""
         if self.fig:
             plt.close(self.fig)
         
-        self.fig = plt.figure(figsize=(16, 10))
+        # 3:2 비율 유지 (720:480)
+        self.fig = plt.figure(figsize=(12, 8))  # 인치 단위
         self.ax = self.fig.add_subplot(111)
         
         # 클릭 이벤트 연결
         self.fig.canvas.mpl_connect('button_press_event', self.on_click)
         
-        print("📊 matplotlib 설정 완료")
+        print("📊 matplotlib 설정 완료 (720x480 비율)")
     
     def start_camera(self, cctv_name: str, stream_url: str) -> bool:
         """카메라 시작"""
@@ -179,83 +180,43 @@ class IntegratedHandoverSystem:
         return [x1, y1, x2, y2]
     
     def process_detections(self, frame: np.ndarray) -> list:
-        """개선된 탐지 처리 (디버깅 포함)"""
+        """개선된 탐지 처리 - 원본 크기 유지"""
         self.frame_counter += 1
         
-        if self.frame_counter % self.detection_interval == 0:
-            original_h, original_w = frame.shape[:2]
-            target_w, target_h = 800, 600
+        # detection_interval을 1로 변경 (매 프레임 탐지)
+        if self.frame_counter % 1 == 0:  # self.detection_interval 대신 1
+            
+            # 리사이즈 없이 원본 프레임 그대로 사용!
+            # 720x480 그대로 YOLO에 전달
+            detections = get_vehicle_detections(frame, conf_threshold=0.2)
             
             if self.debug_mode:
-                print(f"🔍 원본 프레임 크기: {original_w}x{original_h}")
-                print(f"🔍 YOLO 입력 크기: {target_w}x{target_h}")
-            
-            # 리사이즈
-            small_frame = cv2.resize(frame, (target_w, target_h))
-            
-            # YOLO 탐지
-            detections = get_vehicle_detections(small_frame, conf_threshold=0.2)
-            
-            if self.debug_mode:
-                print(f"🔍 원본 detection 수: {len(detections) if detections else 0}")
+                print(f"🔍 원본 프레임 크기: {frame.shape[:2]}")
+                print(f"🔍 탐지 수: {len(detections) if detections else 0}")
             
             if detections:
-                # 스케일 계산
-                scale_x = original_w / target_w
-                scale_y = original_h / target_h
-                
-                if self.debug_mode:
-                    print(f"🔍 스케일: x={scale_x:.3f}, y={scale_y:.3f}")
-                
                 self.last_detections = []
                 for i, det in enumerate(detections):
                     if len(det) >= 4:
+                        # 좌표 변환 없이 그대로 사용!
                         x1, y1, x2, y2 = det[:4]
                         conf = det[4] if len(det) > 4 else 0.5
                         
-                        if self.debug_mode:
-                            print(f"🔍 Detection {i}: 원본({x1:.1f},{y1:.1f},{x2:.1f},{y2:.1f})")
+                        # 정수로 변환만
+                        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                         
-                        # 좌표 복원
-                        scaled_x1 = int(x1 * scale_x)
-                        scaled_y1 = int(y1 * scale_y)
-                        scaled_x2 = int(x2 * scale_x)
-                        scaled_y2 = int(y2 * scale_y)
+                        # 크기 필터링 (너무 작은 박스 제거)
+                        width = x2 - x1
+                        height = y2 - y1
                         
-                        if self.debug_mode:
-                            print(f"🔍 Detection {i}: 복원({scaled_x1},{scaled_y1},{scaled_x2},{scaled_y2})")
-                        
-                        # bbox 유효성 검사
-                        bbox = [scaled_x1, scaled_y1, scaled_x2, scaled_y2]
-                        is_valid, issues = self.validate_bbox(bbox, original_w, original_h)
-                        
-                        if not is_valid and self.debug_mode:
-                            print(f"⚠️ Detection {i}: 좌표 문제 - {issues}")
-                        
-                        # 클리핑
-                        clipped_bbox = self.clip_bbox(bbox, original_w, original_h)
-                        scaled_x1, scaled_y1, scaled_x2, scaled_y2 = clipped_bbox
-                        
-                        # 크기 필터링
-                        width = scaled_x2 - scaled_x1
-                        height = scaled_y2 - scaled_y1
-                        
-                        if self.debug_mode:
-                            print(f"🔍 Detection {i}: 최종({scaled_x1},{scaled_y1},{scaled_x2},{scaled_y2}) 크기({width}x{height})")
-                        
-                        if width > 20 and height > 20:
+                        if width > 20 and height > 20:  # 최소 크기
                             self.last_detections.append((
-                                scaled_x1, scaled_y1, scaled_x2, scaled_y2, conf
+                                x1, y1, x2, y2, conf
                             ))
                             if self.debug_mode:
-                                print(f"✅ Detection {i}: 유효함")
-                        else:
-                            if self.debug_mode:
-                                print(f"❌ Detection {i}: 너무 작음")
+                                print(f"✅ Detection {i}: ({x1},{y1},{x2},{y2})")
             else:
                 self.last_detections = []
-                if self.debug_mode:
-                    print("🔍 탐지된 객체 없음")
         
         return self.last_detections
     
@@ -362,18 +323,30 @@ class IntegratedHandoverSystem:
             print("🛑 핸드오버 종료")
     
     def create_display_frame(self, current_frame: np.ndarray, secondary_frame: np.ndarray = None) -> np.ndarray:
-        """표시용 프레임 생성"""
-        frame_dict = {}
+        """표시용 프레임 생성 - 원본 크기 유지"""
         
-        if current_frame is not None:
-            frame_dict[self.current_cctv["cctvname"]] = current_frame
+        if self.ui_system.current_mode == UIMode.SINGLE:
+            # 단일 모드: 720x480 그대로
+            return current_frame
         
-        if secondary_frame is not None and self.ui_system.secondary_camera:
-            frame_dict[self.ui_system.secondary_camera] = secondary_frame
-        
-        display_frame, transform_info = self.ui_system.create_display_frame(frame_dict)
-        
-        return display_frame
+        else:  # DUAL 모드
+            if current_frame is not None and secondary_frame is not None:
+                # 두 프레임을 옆으로 붙이기 (1440x480)
+                dual_frame = np.hstack([current_frame, secondary_frame])
+                
+                # 구분선 그리기
+                cv2.line(dual_frame, (720, 0), (720, 480), (0, 255, 0), 2)
+                
+                # 라벨 추가
+                cv2.putText(dual_frame, "Current", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                cv2.putText(dual_frame, "Next", (730, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)
+                
+                return dual_frame
+            else:
+                # 하나만 있으면 단일 모드처럼
+                return current_frame if current_frame is not None else secondary_frame
     
     def draw_tracks_on_matplotlib(self, display_frame: np.ndarray, tracks: list):
         """matplotlib에 트랙 그리기 (디버깅 포함)"""

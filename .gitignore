@@ -2,10 +2,11 @@
 .venv/
 downloads/
 videos/
+__pycache__/
 # 환경 변수
 .env
 
-
+Capstone.zip
 
 
 # 민감한 데이터 파일
