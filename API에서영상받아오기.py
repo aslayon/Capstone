@@ -31,6 +31,10 @@ if "response" in data and "data" in data["response"]:
     df.to_json("cctv_list_4.json", orient="records", force_ascii=False)  # JSON도 함께 저장
     print("✅ CCTV 목록이 'cctv_list.xlsx' 파일로 저장되었습니다.")
 else:
+    print("Status Code:", response.status_code)
+    print("Final URL:", response.url)
+    print("Response JSON:", data)
+
     print("⚠️ CCTV 데이터가 없습니다. 응답 메시지:", data.get("resultMsg", "알 수 없음"))
 
 
