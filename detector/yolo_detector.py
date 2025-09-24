@@ -1,16 +1,23 @@
-# yolo_detector.py  (학습 가중치 + 단일 클래스 'vehicle' 버전)
+# yolo_detector.py
 from ultralytics import YOLO
 import cv2
 import numpy as np
 import os
 
 # =========================================
-# 설정: 학습된 가중치 경로 (필요 시 경로 수정)
-# 예) E:\vehset_work\veh_yolo\weights\best.pt
+# 설정: 학습된 가중치 경로 (7 클래스 모델)
 # =========================================
 MODEL_PATH = os.getenv("VEH_WEIGHTS", r"E:\best (2).pt")
- 
-# 모델은 모듈 임포트 시 1회만 로드 (성능)
+
+# ====== [NEW] ROI 설정 ======
+ROI = os.getenv("ROI_RECT", None)
+if ROI:
+    rx1, ry1, rx2, ry2 = map(int, ROI.split(","))
+    ROI = (rx1, ry1, rx2, ry2)
+else:
+    ROI = (200, 120, 700, 430)   # 기본값 (원하는 값으로 수정)
+# ============================
+
 _model = None
 def get_model():
     global _model
@@ -18,36 +25,48 @@ def get_model():
         _model = YOLO(MODEL_PATH)
     return _model
 
-def get_vehicle_detections(frame, conf_threshold=0.2):
+
+def get_vehicle_detections(frame, conf_threshold=0.3):
     """
-    단일 클래스('vehicle')로 학습된 모델 기준 탐지 결과 반환
-    Args:
-        frame (np.ndarray): BGR 이미지
-        conf_threshold (float): confidence threshold
-    Returns:
-        List[Tuple[int,int,int,int,float,str]]: [(x1,y1,x2,y2,conf,'vehicle'), ...]
+    ROI가 설정돼 있으면 해당 영역만 크롭해서 탐지,
+    bbox 좌표는 원본 프레임 기준으로 복원.
+    Returns: [(x1,y1,x2,y2,conf,class_name), ...]
     """
     model = get_model()
+    use_roi = ROI is not None
 
-    # 단일 클래스 모델이므로 classes=None (필터링 불필요)
-    results = model.predict(frame, conf=0.30, iou=0.55, verbose=False)
+    if use_roi:
+        rx1, ry1, rx2, ry2 = ROI
+        roi_img = frame[ry1:ry2, rx1:rx2]
+        infer_img = roi_img
+    else:
+        infer_img = frame
 
+    results = model.predict(infer_img, conf=conf_threshold, iou=0.55, verbose=False)
     detections = []
+
     for r in results:
         if r.boxes is None:
             continue
         for box in r.boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             conf = float(box.conf[0])
-            # 학습 데이터가 1클래스이므로 항상 'vehicle'
-            detections.append((x1, y1, x2, y2, conf, "vehicle"))
+            cls_id = int(box.cls[0])        # 클래스 인덱스
+            cls_name = model.names[cls_id]  # 예: "car-01" ~ "car-07"
+
+            # ROI offset 복원
+            if use_roi:
+                x1 += rx1; x2 += rx1
+                y1 += ry1; y2 += ry1
+
+            detections.append((x1, y1, x2, y2, conf, cls_name))
+
     return detections
 
 
-# 테스트 실행(선택)
+# ===== 테스트 코드 =====
 if __name__ == "__main__":
-    stream_url = "http://example.com/your_stream.m3u8"  # 필요 시 교체
-    cap = cv2.VideoCapture(stream_url)
+    cap = cv2.VideoCapture("your_stream.m3u8")
     ok, frame = cap.read()
     cap.release()
 
@@ -57,10 +76,9 @@ if __name__ == "__main__":
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 200, 255), 2)
             cv2.putText(frame, f"{cls_name} {conf:.2f}", (x1, max(0, y1 - 5)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
-        import matplotlib.pyplot as plt
-        plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        plt.title("Vehicle detections (single-class)")
-        plt.axis("off")
-        plt.show()
+
+        cv2.imshow("Detections", frame)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
     else:
         print("❌ 프레임을 불러올 수 없습니다.")
