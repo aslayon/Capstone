@@ -8,6 +8,7 @@ __pycache__/
 
 yolov8l.pt
 
+debug_frames/
 
 # 민감한 데이터 파일
 cctv_list*.json

@@ -181,7 +181,22 @@ class HLSStreamManager:
         except Exception as e:
             print(f"⚠️ API 호출 실패: {e}")
             return None
-    
+    # 클래스 내부에 추가
+    def switch_to(self, cctv_name: str, new_url: str) -> bool:
+        """
+        실행 중 부드러운 전환: 스레드 재시작 없이 현재 cap만 새 URL로 교체.
+        """
+        self.cctv_name = cctv_name
+        ok = self._connect_stream(new_url)  # 내부에서 backup_cap 교체
+        if ok:
+            self.current_url = new_url
+            self.stats['url_updates'] += 1
+            self.stats['last_update_time'] = time.time()
+        else:
+            print("[HLSStreamManager] switch_to() failed")
+        return ok
+
+
     def _frame_reader_loop(self):
         """프레임 읽기 스레드 (버퍼링)"""
         print("📹 프레임 읽기 스레드 시작")

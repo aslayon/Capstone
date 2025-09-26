@@ -33,6 +33,33 @@ def parse_roi(roi_str):
         return (x1, y1, x2, y2)
     except:
         return None
+def save_current_cctv(name: str, url: str):
+    """CURRENT_CCTV_NAME과 CURRENT_CCTV_URL을 동시에 갱신"""
+    lines = []
+    if ENV_PATH.exists():
+        lines = ENV_PATH.read_text(encoding="utf-8").splitlines()
+
+    updated_name = False
+    updated_url = False
+    out = []
+    for ln in lines:
+        if ln.startswith("CURRENT_CCTV_NAME="):
+            out.append(f"CURRENT_CCTV_NAME={name}")
+            updated_name = True
+        elif ln.startswith("CURRENT_CCTV_URL="):
+            out.append(f"CURRENT_CCTV_URL={url}")
+            updated_url = True
+        else:
+            out.append(ln)
+
+    if not updated_name:
+        out.append(f"CURRENT_CCTV_NAME={name}")
+    if not updated_url:
+        out.append(f"CURRENT_CCTV_URL={url}")
+
+    ENV_PATH.write_text("\n".join(out) + "\n", encoding="utf-8")
+    os.environ["CURRENT_CCTV_NAME"] = name
+    os.environ["CURRENT_CCTV_URL"] = url
 
 def save_current_cctv_url(new_url: str):
     """
