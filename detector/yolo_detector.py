@@ -8,15 +8,18 @@ import os
 # 설정: 학습된 가중치 경로 (필요 시 경로 수정)
 # 예) E:\vehset_work\veh_yolo\weights\best.pt
 # =========================================
-MODEL_PATH = os.getenv("VEH_WEIGHTS", r"E:\best (2).pt")
- 
+MODEL_PATH = os.getenv("VEH_WEIGHTS", r"C:\GIT\best.pt")
+
 # 모델은 모듈 임포트 시 1회만 로드 (성능)
 _model = None
+
+
 def get_model():
     global _model
     if _model is None:
         _model = YOLO(MODEL_PATH)
     return _model
+
 
 def get_vehicle_detections(frame, conf_threshold=0.2):
     """
@@ -46,18 +49,26 @@ def get_vehicle_detections(frame, conf_threshold=0.2):
 
 # 테스트 실행(선택)
 if __name__ == "__main__":
-    stream_url = "http://example.com/your_stream.m3u8"  # 필요 시 교체
+    stream_url = "https://cctvsec.ktict.co.kr/138/pQahsqagIvXoxtKYMYuTVxSWQPyEx4a/DycV69i2ghScblbPnSTRLT9ttd6K1vxfMPPuDRFosHtS9hrOw9UBx2pvvHIkU2kUsC9LaRMvXaQ="  # 필요 시 교체
     cap = cv2.VideoCapture(stream_url)
     ok, frame = cap.read()
     cap.release()
 
     if ok:
         dets = get_vehicle_detections(frame, conf_threshold=0.4)
-        for (x1, y1, x2, y2, conf, cls_name) in dets:
+        for x1, y1, x2, y2, conf, cls_name in dets:
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 200, 255), 2)
-            cv2.putText(frame, f"{cls_name} {conf:.2f}", (x1, max(0, y1 - 5)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+            cv2.putText(
+                frame,
+                f"{cls_name} {conf:.2f}",
+                (x1, max(0, y1 - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 200, 255),
+                2,
+            )
         import matplotlib.pyplot as plt
+
         plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         plt.title("Vehicle detections (single-class)")
         plt.axis("off")
