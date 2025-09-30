@@ -191,8 +191,8 @@ class IntegratedHandoverSystem:
             detections = get_vehicle_detections(frame, conf_threshold=0.2)
             
             if self.debug_mode:
-                print(f"🔍 원본 프레임 크기: {frame.shape[:2]}")
-                print(f"🔍 탐지 수: {len(detections) if detections else 0}")
+                '''print(f"🔍 원본 프레임 크기: {frame.shape[:2]}")
+                print(f"🔍 탐지 수: {len(detections) if detections else 0}")'''
             
             if detections:
                 self.last_detections = []
@@ -355,8 +355,8 @@ class IntegratedHandoverSystem:
         # 프레임 정보 출력
         frame_h, frame_w = display_frame.shape[:2]
         if self.debug_mode:
-            print(f"🖼️ 표시 프레임 크기: {frame_w}x{frame_h}")
-            print(f"🖼️ UI 모드: {self.ui_system.current_mode.value}")
+            '''print(f"🖼️ 표시 프레임 크기: {frame_w}x{frame_h}")
+            print(f"🖼️ UI 모드: {self.ui_system.current_mode.value}")'''
         
         # 프레임 표시
         frame_rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
@@ -447,7 +447,7 @@ class IntegratedHandoverSystem:
         if self.debug_mode:
             xlim = self.ax.get_xlim()
             ylim = self.ax.get_ylim()
-            print(f"🖼️ matplotlib 범위: x({xlim[0]:.1f},{xlim[1]:.1f}) y({ylim[0]:.1f},{ylim[1]:.1f})")
+            #print(f"🖼️ matplotlib 범위: x({xlim[0]:.1f},{xlim[1]:.1f}) y({ylim[0]:.1f},{ylim[1]:.1f})")
         
         plt.pause(0.01)
     

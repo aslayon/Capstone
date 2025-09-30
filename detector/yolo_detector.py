@@ -1,90 +1,65 @@
+# yolo_detector.py  (학습 가중치 + 단일 클래스 'vehicle' 버전)
 from ultralytics import YOLO
-import torch
 import cv2
 import numpy as np
+import os
 
-# YOLO 모델 초기화 (자동으로 GPU 사용됨)
-model = YOLO("yolov8n")  # 필요에 따라 yolov8n.pt, yolov8m.pt 등 사용 가능
+# =========================================
+# 설정: 학습된 가중치 경로 (필요 시 경로 수정)
+# 예) E:\vehset_work\veh_yolo\weights\best.pt
+# =========================================
+MODEL_PATH = os.getenv("VEH_WEIGHTS", r"E:\best (2).pt")
+ 
+# 모델은 모듈 임포트 시 1회만 로드 (성능)
+_model = None
+def get_model():
+    global _model
+    if _model is None:
+        _model = YOLO(MODEL_PATH)
+    return _model
 
-# COCO 클래스 매핑
-COCO_CLASSES = {
-    'car': 2,
-    'truck': 7,
-    'bus': 5,
-    'motorcycle': 3
-}
-
-def get_vehicle_detections(frame, conf_threshold=0.5, vehicle_classes=['car']):
+def get_vehicle_detections(frame, conf_threshold=0.2):
     """
-    주어진 프레임에서 차량(bbox) 탐지 결과를 반환
-
+    단일 클래스('vehicle')로 학습된 모델 기준 탐지 결과 반환
     Args:
-        frame (np.ndarray): 입력 이미지 (BGR)
+        frame (np.ndarray): BGR 이미지
         conf_threshold (float): confidence threshold
-        vehicle_classes (list): 탐지할 차량 클래스 ['car', 'truck', 'bus', 'motorcycle']
-
     Returns:
-        List[Tuple[int, int, int, int, float, str]]: [(x1, y1, x2, y2, confidence, class_name), ...]
+        List[Tuple[int,int,int,int,float,str]]: [(x1,y1,x2,y2,conf,'vehicle'), ...]
     """
-    # 클래스 이름을 COCO 클래스 ID로 변환
-    class_ids = []
-    for vehicle_class in vehicle_classes:
-        if vehicle_class in COCO_CLASSES:
-            class_ids.append(COCO_CLASSES[vehicle_class])
-        else:
-            print(f"⚠️ 알 수 없는 클래스: {vehicle_class}")
-    
-    if not class_ids:
-        print("❌ 유효한 차량 클래스가 없습니다.")
-        return []
-    
-    # YOLO 실행
-    results = model.predict(frame, conf=conf_threshold, classes=class_ids, verbose=False)
+    model = get_model()
+
+    # 단일 클래스 모델이므로 classes=None (필터링 불필요)
+    results = model.predict(frame, conf=0.30, iou=0.55, verbose=False)
+
     detections = []
-
-    # 클래스 ID를 이름으로 매핑 (역방향)
-    id_to_name = {v: k for k, v in COCO_CLASSES.items()}
-
     for r in results:
+        if r.boxes is None:
+            continue
         for box in r.boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             conf = float(box.conf[0])
-            class_id = int(box.cls[0])
-            class_name = id_to_name.get(class_id, 'unknown')
-            
-            detections.append((x1, y1, x2, y2, conf, class_name))
-
+            # 학습 데이터가 1클래스이므로 항상 'vehicle'
+            detections.append((x1, y1, x2, y2, conf, "vehicle"))
     return detections
 
 
-# 테스트 코드 (모듈 단독 실행 시)
+# 테스트 실행(선택)
 if __name__ == "__main__":
-    stream_url = "http://cctvsec.ktict.co.kr/138/pQahsqagIvXoxtKYMYuTVxSWQPyEx4a/DycV69i2ghScblbPnSTRLT9ttd6K1vxfdzVH2B2WDjzDDFu8a5pSZocJ9jNGE5Bx51hdStrzVl0="
+    stream_url = "http://example.com/your_stream.m3u8"  # 필요 시 교체
     cap = cv2.VideoCapture(stream_url)
-    ret, frame = cap.read()
+    ok, frame = cap.read()
     cap.release()
 
-    if ret:
-        # 차량과 트럭 모두 탐지
-        dets = get_vehicle_detections(frame, vehicle_classes=['car', 'truck'])
-        
-        for (x1, y1, x2, y2, conf, class_name) in dets:
-            # 클래스별로 다른 색상
-            if class_name == 'car':
-                color = (0, 255, 0)  # 초록색
-            elif class_name == 'truck':
-                color = (0, 0, 255)  # 빨간색
-            else:
-                color = (255, 0, 0)  # 파란색
-                
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, f"{class_name} {conf:.2f}", (x1, y1 - 5), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    if ok:
+        dets = get_vehicle_detections(frame, conf_threshold=0.4)
+        for (x1, y1, x2, y2, conf, cls_name) in dets:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 200, 255), 2)
+            cv2.putText(frame, f"{cls_name} {conf:.2f}", (x1, max(0, y1 - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
         import matplotlib.pyplot as plt
-        plt.imshow(frame_rgb)
-        plt.title("YOLO 차량+트럭 탐지 결과")
+        plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        plt.title("Vehicle detections (single-class)")
         plt.axis("off")
         plt.show()
     else:
