@@ -30,10 +30,19 @@ if "response" in data and "data" in data["response"]:
     df = df[["cctvname", "cctvurl", "coordx", "coordy", "cctvtype", "cctvformat"]]
 
     # 엑셀로 저장
+<<<<<<< HEAD
     df.to_excel("cctv_list_4.xlsx", index=False)
     df.to_json(
         "cctv_list_4.json", orient="records", force_ascii=False
     )  # JSON도 함께 저장
+=======
+    df.to_excel("data\cctv_list_4.xlsx", index=False)
+    df.to_json("data\cctv_list_4.json", orient="records", force_ascii=False)  # JSON도 함께 저장
+>>>>>>> eb104b3265a5e3394a4d9c77b1af5d34240f821d
     print("✅ CCTV 목록이 'cctv_list.xlsx' 파일로 저장되었습니다.")
 else:
+    print("Status Code:", response.status_code)
+    print("Final URL:", response.url)
+    print("Response JSON:", data)
+
     print("⚠️ CCTV 데이터가 없습니다. 응답 메시지:", data.get("resultMsg", "알 수 없음"))
