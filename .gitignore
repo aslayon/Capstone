@@ -15,3 +15,7 @@ cctv_list*.json
 cctv_list*.xlsx
 *.xlsx
 *.csv
+
+__pycache__/
+*.pyc
+
