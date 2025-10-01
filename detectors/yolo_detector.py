@@ -7,7 +7,7 @@ import os
 # =========================================
 # 설정: 학습된 가중치 경로 (7 클래스 모델)
 # =========================================
-MODEL_PATH = os.getenv("VEH_WEIGHTS", r"E:\best (2).pt")
+MODEL_PATH = os.getenv("VEH_WEIGHTS", r"best_1cls.pt")
 
 # ====== [NEW] ROI 설정 ======
 ROI = os.getenv("ROI_RECT", None)
@@ -26,7 +26,7 @@ def get_model():
     return _model
 
 
-def get_vehicle_detections(frame, conf_threshold=0.3):
+def get_vehicle_detections(frame, conf_threshold=0.2):
     """
     ROI가 설정돼 있으면 해당 영역만 크롭해서 탐지,
     bbox 좌표는 원본 프레임 기준으로 복원.

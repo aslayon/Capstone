@@ -7,7 +7,7 @@ from core.cctv_graph import load_cctv_list, find_url_by_name
 
 # API 스크립트 경로 (레포 루트 기준)
 FETCHER_PATH = Path("API에서영상받아오기.py")
-OUT_JSON = Path("cctv_list_4.json")  # fetcher가 생성하는 파일명과 맞춤
+OUT_JSON = Path(r"data\cctv_list_4.json")  # fetcher가 생성하는 파일명과 맞춤
 
 def _run_fetcher_once(python_exe: Optional[str] = None, timeout: int = 20) -> bool:
     """API에서영상받아오기.py를 한 번 실행해서 최신 JSON을 생성."""
