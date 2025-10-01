@@ -81,7 +81,7 @@ def run():
         disp_tri = None
         switcher.tick()
         frame = switcher.center_sm.get_frame()
-        
+        dets = []
         
         frame_idx += 1
         
@@ -123,17 +123,25 @@ def run():
         H, W = frame.shape[:2]
         frame_shape[0], frame_shape[1] = H, W
 
-        # 1) YOLO 탐지 + ROI 필터
-        try:
-            dets = get_vehicle_detections(frame, conf_threshold=cfg["DET_CONF"])
-        except Exception as e:
-            print("[YOLO ERROR]", e)
-            dets = []
-        dets = [d for d in dets if bbox_center_in_any_roi(d, [roi])]
+        # === 1) YOLO 탐지 + ROI 필터 ===
+        run_yolo = (frame_idx % 2 == 0)
 
-        # 2) Tracker 업데이트
-        dets_xyxy = [d[:4] for d in dets]
-        tracks = tracker.update(dets_xyxy)
+        if run_yolo:
+            try:
+                dets = get_vehicle_detections(frame, conf_threshold=cfg["DET_CONF"])
+            except Exception as e:
+                print("[YOLO ERROR]", e)
+                dets = []
+            # ROI 필터(있다면)
+            dets = [d for d in dets if bbox_center_in_any_roi(d, [roi])]  # roi 없으면 그대로
+
+            # === 2) Tracker 업데이트 (정규 루트)
+            dets_xyxy = [d[:4] for d in dets]
+            tracks = tracker.update(dets_xyxy)  # -> [(id,x1,y1,x2,y2), ...]
+        else:
+            # === 2) YOLO 생략: 칼만 예측으로만 메우기
+            tracks = tracker.predict_only()     # -> [(id,x1,y1,x2,y2), ...]
+
 
         # 선택 ID 미탐지 카운트
         if tracker.selected_id is not None and all(tid != tracker.selected_id for tid, *_ in tracks):

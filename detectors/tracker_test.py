@@ -67,13 +67,15 @@ class MultiTracker:
 
     def _convert_to_bbox(self, pred):
         cx, cy, s, r = pred
-        w = max(1e-6, np.sqrt(s * r))
-        h = max(1e-6, s / w)
+        val = max(0.0, s * r)        # ✅ 음수 방지
+        w = max(1e-6, np.sqrt(val))  # sqrt 전에 clamp
+        h = max(1e-6, s / w if w > 1e-12 else 1e-6)
         x1 = cx - w / 2
         y1 = cy - h / 2
         x2 = cx + w / 2
         y2 = cy + h / 2
         return (x1, y1, x2, y2)
+
 
     def _iou(self, bb_test, bb_gt):
         xx1 = max(bb_test[0], bb_gt[0])
@@ -118,6 +120,7 @@ class MultiTracker:
         return None
 
 
+
 class Track:
     _id_iter = itertools.count()
 
@@ -132,26 +135,53 @@ class Track:
 
     def _init_kalman_filter(self, bbox):
         kf = KalmanFilter(dim_x=7, dim_z=4)
-        kf.F = np.array([[1, 0, 0, 0, 1, 0, 0],
-                         [0, 1, 0, 0, 0, 1, 0],
-                         [0, 0, 1, 0, 0, 0, 1],
-                         [0, 0, 0, 1, 0, 0, 0],
-                         [0, 0, 0, 0, 1, 0, 0],
-                         [0, 0, 0, 0, 0, 1, 0],
-                         [0, 0, 0, 0, 0, 0, 1]])
-        kf.H = np.array([[1, 0, 0, 0, 0, 0, 0],
-                         [0, 1, 0, 0, 0, 0, 0],
-                         [0, 0, 1, 0, 0, 0, 0],
-                         [0, 0, 0, 1, 0, 0, 0]])
-        kf.R *= 10.
-        kf.P *= 500.
-        kf.Q *= 0.01
-        cx = (bbox[0] + bbox[2]) / 2
-        cy = (bbox[1] + bbox[3]) / 2
-        s = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
-        r = (bbox[2] - bbox[0]) / (bbox[3] - bbox[1])
+
+        # state: [cx, cy, s, r, vx, vy, vs]
+        kf.F = np.array([
+            [1, 0, 0, 0, 1, 0, 0],  # cx += vx
+            [0, 1, 0, 0, 0, 1, 0],  # cy += vy
+            [0, 0, 1, 0, 0, 0, 1],  # s  += vs
+            [0, 0, 0, 1, 0, 0, 0],  # r  (정적)
+            [0, 0, 0, 0, 1, 0, 0],  # vx
+            [0, 0, 0, 0, 0, 1, 0],  # vy
+            [0, 0, 0, 0, 0, 0, 1],  # vs
+        ])
+        kf.H = np.array([
+            [1, 0, 0, 0, 0, 0, 0],  # cx
+            [0, 1, 0, 0, 0, 0, 0],  # cy
+            [0, 0, 1, 0, 0, 0, 0],  # s
+            [0, 0, 0, 1, 0, 0, 0],  # r
+        ])
+
+        # ---- R: 관측(디텍션) 노이즈 공분산 -> YOLO를 '더' 믿도록 감소
+        # (픽셀 단위/스케일(ratio) 단위가 다르니 항목별로 다르게)
+        # cx, cy, s, r 순서
+        kf.R = np.diag([0.1, 0.1, 1.0, 1.0]).astype(float)
+
+        # ---- P: 초기 공분산(초기 불확실성). 너무 크면 출렁, 너무 작으면 딱딱
+        kf.P = np.diag([50., 50., 400., 10., 50., 50., 100.]).astype(float)
+
+        # ---- Q: 프로세스(모션) 노이즈 공분산 -> 예측을 '유연하게' (차량은 크게)
+        # 위치, 크기 변화(속도), 속도 자체에 더 큰 노이즈를 준다
+        q_pos = 1.0   # cx, cy
+        q_s   = 1.0   # s
+        q_r   = 0.1  # r (종횡비는 상대적으로 천천히 변함)
+        q_vel = 6.0   # vx, vy
+        q_vs  = 3.0   # vs
+        kf.Q = np.diag([q_pos, q_pos, q_s, q_r, q_vel, q_vel, q_vs]).astype(float)
+
+        # ---- 초기 상태 셋업
+        cx = (bbox[0] + bbox[2]) / 2.0
+        cy = (bbox[1] + bbox[3]) / 2.0
+        w  = max(1e-6, (bbox[2] - bbox[0]))
+        h  = max(1e-6, (bbox[3] - bbox[1]))
+        s  = w * h
+        r  = w / h
+
         kf.x[:4] = np.array([[cx], [cy], [s], [r]])
+
         return kf
+
 
     def predict(self):
         self.kf.predict()
@@ -172,13 +202,15 @@ class Track:
 
     def get_bbox(self):
         cx, cy, s, r = self.kf.x[:4].flatten()
-        w = max(1e-6, np.sqrt(s * r))
-        h = max(1e-6, s / w)
+        val = max(0.0, s * r)        # ✅ 음수 방지
+        w = max(1e-6, np.sqrt(val))
+        h = max(1e-6, s / w if w > 1e-12 else 1e-6)
         x1 = int(cx - w / 2)
         y1 = int(cy - h / 2)
         x2 = int(cx + w / 2)
         y2 = int(cy + h / 2)
         return (x1, y1, x2, y2)
+
 
     def contains_point(self, x, y):
         x1, y1, x2, y2 = self.get_bbox()
