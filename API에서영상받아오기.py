@@ -1,7 +1,10 @@
 import requests
 import pandas as pd
 import os
+from dotenv import load_dotenv, find_dotenv
 
+# .env 로드 (.env는 프로젝트 루트: c:\GIT\Capstone-1\.env)
+load_dotenv(find_dotenv(), override=False)
 url = "https://openapi.its.go.kr:9443/cctvInfo"
 params = {
     "apiKey": os.getenv("ITS_API_KEY"),  # 여기에 본인의 키 입력
@@ -11,7 +14,7 @@ params = {
     "maxX": "127.89",
     "minY": "34.9",
     "maxY": "35.1",
-    "getType": "json"
+    "getType": "json",
 }
 
 response = requests.get(url, params=params)
@@ -28,7 +31,9 @@ if "response" in data and "data" in data["response"]:
 
     # 엑셀로 저장
     df.to_excel("data\cctv_list_4.xlsx", index=False)
-    df.to_json("data\cctv_list_4.json", orient="records", force_ascii=False)  # JSON도 함께 저장
+    df.to_json(
+        "data\cctv_list_4.json", orient="records", force_ascii=False
+    )  # JSON도 함께 저장
     print("✅ CCTV 목록이 'cctv_list.xlsx' 파일로 저장되었습니다.")
 else:
     print("Status Code:", response.status_code)
@@ -36,8 +41,3 @@ else:
     print("Response JSON:", data)
 
     print("⚠️ CCTV 데이터가 없습니다. 응답 메시지:", data.get("resultMsg", "알 수 없음"))
-
-
-
-
-
