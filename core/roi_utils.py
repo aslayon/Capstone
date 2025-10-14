@@ -1,5 +1,5 @@
 # core/roi_utils.py
-
+# ROI 관련 유틸
 def shift_roi(roi, offset_x=0, offset_y=0):
     if not roi: return None
     x1,y1,x2,y2 = roi

@@ -9,6 +9,10 @@
       {
         "direction": "north",
         "target": "[남해선] 선평교"
+      },
+      {
+        "direction": "west",
+        "target": "[남해선] 순천"
       }
     ]
   },
@@ -48,8 +52,11 @@
       {
         "direction": "north",
         "target": "[남해선] 지본교"
+      },
+      {
+        "direction": "east",
+        "target": "[남해선] 죽평"
       }
     ]
   }
-  
 ]

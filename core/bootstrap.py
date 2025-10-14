@@ -1,4 +1,6 @@
 # core/bootstrap.py
+# 초기 실행 시 CCTV 목록 최신화 및 .env 갱신
+#
 import os, sys, json, subprocess, time
 from pathlib import Path
 from typing import Optional

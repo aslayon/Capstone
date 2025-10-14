@@ -1,4 +1,6 @@
 # core/mouse_tri.py
+# tri 윈도우에서 클릭으로 좌/중/우 CCTV 전환
+    
 import cv2
 
 class TriClickHandler:

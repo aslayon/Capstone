@@ -1,4 +1,8 @@
 # core/switch_controller.py
+# - 실행 중 .env 변경 감지 → 부드러운 전환  -> 카메라 전환 관련
+# - 키보드 'a','d' → 좌/우 이웃으로 전환
+
+
 import os, time
 from typing import Optional, Dict
 from core.cctv_graph import load_graph, load_cctv_list, get_neighbors, find_url_by_name

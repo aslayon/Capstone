@@ -5,7 +5,7 @@ videos/
 __pycache__/
 # 환경 변수
 .env
-
+selected_crops/
 yolov8l.pt
 *.pt
 debug_frames/

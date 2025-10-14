@@ -1,4 +1,5 @@
 # core/window_utils.py
+# OpenCV 창 크기 자동 맞춤 유틸
 import cv2
 
 def fit_window_to_image(win_name: str, img) -> None:

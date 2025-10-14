@@ -23,6 +23,34 @@ from detectors.yolo_detector import get_vehicle_detections
 from core.stream_manager import HLSStreamManager
 from core.switch_controller import SwitchController
 from core.bootstrap import refresh_initial_url
+import os
+import cv2
+from collections import deque
+
+# --- 전역 크롭 버퍼 ---
+crop_buffer = deque(maxlen=5)
+
+def save_selected_crop(frame, bbox, obj_id, save_dir="selected_crops"):
+    """선택된 차량 bbox 이미지를 저장 (최근 5장 유지)"""
+    os.makedirs(save_dir, exist_ok=True)
+
+    x1, y1, x2, y2 = map(int, bbox)
+    h, w = frame.shape[:2]
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(w, x2), min(h, y2)
+
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        return  # 잘못된 bbox 방지
+
+    filename = os.path.join(save_dir, f"id_{obj_id}_frame_{len(crop_buffer)}.jpg")
+    cv2.imwrite(filename, crop)
+
+    crop_buffer.append(filename)
+    print(f"[CROP] saved: {filename}")
+
+
+
 WIN = "Capstone - CCTV Tracking"
 
 def run():
@@ -163,6 +191,9 @@ def run():
 
             for tid,x1,y1,x2,y2 in tracks:
                 color = (0,0,255) if (tracker.selected_id is not None and tid == tracker.selected_id) else (0,255,0)
+                if tracker.selected_id is not None and tid == tracker.selected_id:
+                    # 선택된 차량 bbox 저장
+                    save_selected_crop(frame, (x1, y1, x2, y2), tid)
                 cv2.rectangle(frame, (x1,y1), (x2,y2), color, 2)
                 cv2.putText(frame, f"ID {tid}", (x1, y1-10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
