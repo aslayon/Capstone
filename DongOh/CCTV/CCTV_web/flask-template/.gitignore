@@ -1,0 +1,36 @@
+# Environments
+.env
+.env.*
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Flask
+instance/
+.webassets-cache/
+
+# Editors
+.vscode/
+
+# Logs/temp
+*.log
+*.tmp
+*.txt
+# 주의: 모든 .txt 무시는 제거(필요 시 개별 파일만 추가)
+# *.txt
+# 필요 시 특정 텍스트만:
+# notes/*.txt
+
+# OS
+.DS_Store
+Thumbs.db
