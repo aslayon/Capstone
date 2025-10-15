@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ camera.name }} - 실시간 스트림</h2>
+<div style="position:relative; display:inline-block;">
+	<img id="video" src="{{ url_for('video_feed', slot=camera.slot) }}" style="max-width:100%; border:1px solid #ccc; display:block;">
+</div>
+<div style="margin-top:8px;">
+	<a href="{{ url_for('logs') }}">탐지 로그 보기</a>
+	<a href="{{ url_for('cctv_select') }}">카메라 목록으로 돌아가기</a>
+</div>
+{% endblock %}

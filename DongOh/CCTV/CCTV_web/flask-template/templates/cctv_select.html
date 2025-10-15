@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% set slot_names = ['A','B','C','D'] %}
+
+<h2>서울</h2>
+<div class="grid-4 region-solid">
+  {% set region_key = 'SEOUL' %}
+  {% for row in [1,2] %}
+    {% for col in range(4) %}
+      {% set slot = region_key ~ '-' ~ slot_names[col] ~ row %}
+      <a class="placeholder-card" href="{{ url_for('cctv_page', slot=slot) }}">
+        <div class="meta">
+          <strong>{{ hardcoded_cameras[slot].name }}</strong>
+          <div style="font-size:0.85rem; color:#666;">{{ slot }}</div>
+        </div>
+      </a>
+    {% endfor %}
+  {% endfor %}
+</div>
+
+<h2 style="margin-top:1.5rem;">경기도</h2>
+<div class="grid-4 region-solid">
+  {% set region_key = 'GYEONGGI' %}
+  {% for row in [1,2] %}
+    {% for col in range(4) %}
+      {% set slot = region_key ~ '-' ~ slot_names[col] ~ row %}
+      <a class="placeholder-card" href="{{ url_for('cctv_page', slot=slot) }}">
+        <div class="meta">
+          <strong>{{ hardcoded_cameras[slot].name }}</strong>
+          <div style="font-size:0.85rem; color:#666;">{{ slot }}</div>
+        </div>
+      </a>
+    {% endfor %}
+  {% endfor %}
+</div>
+
+{% endblock %}

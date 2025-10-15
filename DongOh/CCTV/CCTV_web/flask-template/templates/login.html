@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="auth-container">
+  <div class="auth-card">
+    <h1>실시간 교통상황</h1>
+    <form method="post">
+      <label for="username">ID</label>
+      <input id="username" name="username" required>
+      <label for="password">PW</label>
+      <input id="password" name="password" type="password" required>
+      <button type="submit">로그인</button>
+    </form>
+    <div class="muted">아직 회원이 아니신가요? <a class="link" href="{{ url_for('signup') }}">회원가입하기</a></div>
+  </div>
+</div>
+{% endblock %}
