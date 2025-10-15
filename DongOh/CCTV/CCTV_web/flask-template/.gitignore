@@ -25,7 +25,8 @@ instance/
 # Logs/temp
 *.log
 *.tmp
-*.txt
+
+dev-requirements.txt
 # 주의: 모든 .txt 무시는 제거(필요 시 개별 파일만 추가)
 # *.txt
 # 필요 시 특정 텍스트만:
