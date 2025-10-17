@@ -10,7 +10,8 @@ Remove-Item instance\app.db -ErrorAction SilentlyContinue
 입력후
 python app.py실행 ㄱㄱ
 """
-
+from core.pipeline import run_detect
+from core.frame_bus import BUS
 from datetime import datetime
 import time
 import json
@@ -335,20 +336,16 @@ def video_feed(slot: str):
 
     def gen():
         while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            ret, buffer = cv2.imencode(".jpg", frame)
-            if not ret:
+            frame = BUS.latest()
+            if frame is None:
+                time.sleep(0.03)
                 continue
-            jpg = buffer.tobytes()
-            yield (b"--frame\r\n" b"Content-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
-
-        cap.release()
-
-    return Response(
-        stream_with_context(gen()), mimetype="multipart/x-mixed-replace; boundary=frame"
-    )
+            ok, jpg = cv2.imencode(".jpg", frame)
+            if not ok:
+                continue
+            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" +
+                   jpg.tobytes() + b"\r\n")
+    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 # ---------- 라우트: 로그 조회 ----------
@@ -459,9 +456,14 @@ def ensure_slot_column():
                 print("slot 컬럼이 추가되었습니다.")
     except Exception as e:
         print(f"slot 컬럼 추가 실패: {e}")
+        
+def start_pipeline_background():
+    """파이프라인을 별도 스레드로 실행"""
+    print("[INIT] Starting pipeline thread...")
+    t = threading.Thread(target=run_detect, daemon=True)
+    t.start()
 
-
-if __name__ == "__main__":
+def run():
     # 개발 편의를 위해 직접 실행도 가능
     with app.app_context():
         db.create_all()
@@ -469,4 +471,5 @@ if __name__ == "__main__":
         if Camera.query.count() == 0:
             db.session.add(Camera(name="웹캠(로컬)", stream_url="0"))
             db.session.commit()
-    app.run(debug=True)
+    start_pipeline_background()
+    app.run(debug=False, threaded=True)

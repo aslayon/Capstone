@@ -23,3 +23,5 @@ def split_dets_by_segment(dets: List[BBox], seg_w: int = 720) -> Dict[str, List[
             # Right
             out["R"].append((x1 - seg_w * 2, y1, x2 - seg_w * 2, y2, conf, cls))
     return out
+
+

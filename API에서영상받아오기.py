@@ -10,10 +10,10 @@ params = {
     "apiKey": os.getenv("ITS_API_KEY"),  # 여기에 본인의 키 입력
     "type": "all",
     "cctvType": "4",
-    "minX": "126.8",
-    "maxX": "127.89",
-    "minY": "34.9",
-    "maxY": "35.1",
+    "minX": "124.0",      # 서쪽 (인천·백령도 근처)
+    "maxX": "132.0",      # 동쪽 (울릉도 근처)
+    "minY": "33.0",       # 남쪽 (제주도 포함)
+    "maxY": "39.5",       # 북쪽 (강원도 북부까지)
     "getType": "json",
 }
 
