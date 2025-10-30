@@ -1,11 +1,12 @@
 # ==== Lightweight handover features & camera-wise whitening ====
 import json
 from pathlib import Path
+from core.config import CAM_STATS_PATH
 import numpy as np
 import cv2
 
 class _CamStats:
-    def __init__(self, save_path="cam_stats.json", momentum=0.1):
+    def __init__(self, save_path: str | Path = CAM_STATS_PATH, momentum=0.1):
         self.path = Path(save_path)
         self.m = float(momentum)
         self.mu, self.sigma = {}, {}
@@ -38,7 +39,7 @@ class _CamStats:
 
 
 
-_CAMSTATS = _CamStats("cam_stats.json", momentum=0.1)
+_CAMSTATS = _CamStats(CAM_STATS_PATH, momentum=0.1)
 
 def _crop_safe(img, xyxy):
     h, w = img.shape[:2]; x1,y1,x2,y2 = map(int, xyxy)

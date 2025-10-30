@@ -1,6 +1,6 @@
 import cv2
 
-img_path = "frame.jpg"   # CCTV에서 캡처한 샘플 이미지
+img_path = "assets/samples/frame.jpg"   # CCTV에서 캡처한 샘플 이미지
 img = cv2.imread(img_path)
 clone = img.copy()
 roi_coords = []

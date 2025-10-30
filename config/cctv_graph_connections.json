@@ -1,0 +1,81 @@
+[
+  {
+    "cctvname": "[세종포천선] [포천]고삼터널(포천)-외부1/1",
+    "connections": [
+      { "direction": "north", "target": "[세종포천선] [포천]고삼터널(포천)-1/11" },
+      { "direction": "south", "target": "[세종포천선] [세종]고삼터널(세종)-11/11" }
+    ]
+  },
+
+  { "cctvname": "[세종포천선] [포천]고삼터널(포천)-1/11",
+    "connections": [
+      { "direction": "south", "target": "[세종포천선] [포천]고삼터널(포천)-외부1/1" },
+      { "direction": "north", "target": "[세종포천선] [포천]고삼터널(포천)-3/11" }
+    ]
+  },
+  { "cctvname": "[세종포천선] [포천]고삼터널(포천)-3/11",
+    "connections": [
+      { "direction": "south", "target": "[세종포천선] [포천]고삼터널(포천)-1/11" },
+      { "direction": "north", "target": "[세종포천선] [포천]고삼터널(포천)-5/11" }
+    ]
+  },
+  { "cctvname": "[세종포천선] [포천]고삼터널(포천)-5/11",
+    "connections": [
+      { "direction": "south", "target": "[세종포천선] [포천]고삼터널(포천)-3/11" },
+      { "direction": "north", "target": "[세종포천선] [포천]고삼터널(포천)-7/11" }
+    ]
+  },
+  { "cctvname": "[세종포천선] [포천]고삼터널(포천)-7/11",
+    "connections": [
+      { "direction": "south", "target": "[세종포천선] [포천]고삼터널(포천)-5/11" },
+      { "direction": "north", "target": "[세종포천선] [포천]고삼터널(포천)-9/11" }
+    ]
+  },
+  { "cctvname": "[세종포천선] [포천]고삼터널(포천)-9/11",
+    "connections": [
+      { "direction": "south", "target": "[세종포천선] [포천]고삼터널(포천)-7/11" },
+      { "direction": "north", "target": "[세종포천선] [포천]고삼터널(포천)-11/11" }
+    ]
+  },
+  { "cctvname": "[세종포천선] [포천]고삼터널(포천)-11/11",
+    "connections": [
+      { "direction": "south", "target": "[세종포천선] [포천]고삼터널(포천)-9/11" }
+    ]
+  },
+
+  { "cctvname": "[세종포천선] [세종]고삼터널(세종)-11/11",
+    "connections": [
+      { "direction": "north", "target": "[세종포천선] [포천]고삼터널(포천)-1/11" },
+      { "direction": "south", "target": "[세종포천선] [세종]고삼터널(세종)-9/11" }
+    ]
+  },
+  { "cctvname": "[세종포천선] [세종]고삼터널(세종)-9/11",
+    "connections": [
+      { "direction": "north", "target": "[세종포천선] [세종]고삼터널(세종)-11/11" },
+      { "direction": "south", "target": "[세종포천선] [세종]고삼터널(세종)-7/11" }
+    ]
+  },
+  { "cctvname": "[세종포천선] [세종]고삼터널(세종)-7/11",
+    "connections": [
+      { "direction": "north", "target": "[세종포천선] [세종]고삼터널(세종)-9/11" },
+      { "direction": "south", "target": "[세종포천선] [세종]고삼터널(세종)-5/11" }
+    ]
+  },
+  { "cctvname": "[세종포천선] [세종]고삼터널(세종)-5/11",
+    "connections": [
+      { "direction": "north", "target": "[세종포천선] [세종]고삼터널(세종)-7/11" },
+      { "direction": "south", "target": "[세종포천선] [세종]고삼터널(세종)-3/11" }
+    ]
+  },
+  { "cctvname": "[세종포천선] [세종]고삼터널(세종)-3/11",
+    "connections": [
+      { "direction": "north", "target": "[세종포천선] [세종]고삼터널(세종)-5/11" },
+      { "direction": "south", "target": "[세종포천선] [세종]고삼터널(세종)-1/11" }
+    ]
+  },
+  { "cctvname": "[세종포천선] [세종]고삼터널(세종)-1/11",
+    "connections": [
+      { "direction": "north", "target": "[세종포천선] [세종]고삼터널(세종)-3/11" }
+    ]
+  }
+]

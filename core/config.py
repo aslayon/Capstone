@@ -6,6 +6,16 @@ from dotenv import load_dotenv
 
 ENV_PATH = Path(".env")
 
+# Project paths
+ROOT_DIR = Path(__file__).resolve().parents[1]
+CONFIG_DIR = ROOT_DIR / "config"
+ASSETS_DIR = ROOT_DIR / "assets"
+SAMPLES_DIR = ASSETS_DIR / "samples"
+
+# Common config files
+CCTV_GRAPH_PATH = CONFIG_DIR / "cctv_graph_connections.json"
+CAM_STATS_PATH = CONFIG_DIR / "cam_stats.json"
+
 def load_config():
     # .env 로드
     if ENV_PATH.exists():

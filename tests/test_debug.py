@@ -84,7 +84,7 @@ class FixedDualCamera:
     def _load_connections(self):
         """연결 관계 로드"""
         try:
-            with open("cctv_graph_connections.json", 'r', encoding='utf-8') as f:
+            with open("config/cctv_graph_connections.json", 'r', encoding='utf-8') as f:
                 connections = json.load(f)
             print(f"✅ 연결 관계 로드: {len(connections)}개")
             return connections

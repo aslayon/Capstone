@@ -134,7 +134,7 @@ def run_detect():
 
 
     switcher = SwitchController(current_name, current_url, api_key=cfg["ITS_API_KEY"],
-                                graph_path="data/cctv_graph_connections.json",
+                                graph_path="config/cctv_graph_connections.json",
                                 list_path="data/cctv_list_4.json", env_path=".env") 
     switcher.attach_center_manager(sm)
 
@@ -160,21 +160,21 @@ def run_detect():
         model_path="yolo11n.pt",
         conf_threshold=cfg["DET_CONF"],
         iou_threshold=cfg["TRACKER_IOU_TH"],
-        tracker_config="bytetrack.yaml"
+        tracker_config="detectors/bytetrack.yaml"
     )
 
     tracker_L = YOLOTracker(
         model_path="yolo11n.pt",
         conf_threshold=cfg["DET_CONF"],
         iou_threshold=cfg["TRACKER_IOU_TH"],
-        tracker_config="bytetrack.yaml"
+        tracker_config="detectors/bytetrack.yaml"
     )
 
     tracker_R = YOLOTracker(
         model_path="yolo11n.pt",
         conf_threshold=cfg["DET_CONF"],
         iou_threshold=cfg["TRACKER_IOU_TH"],
-        tracker_config="bytetrack.yaml"
+        tracker_config="detectors/bytetrack.yaml"
     )
 
     crop_saver = CropSaver(save_root="reid_crops", save_every=3, pad=2, print_interval_sec=1.0)
@@ -741,7 +741,7 @@ def run_detect():
 
 
     _CAMSTATS.save()
-    print("[INFO] cam_stats.json 저장 완료")
+    print("[INFO] cam_stats 저장 완료: config/cam_stats.json")
     sm.stop()
     cv2.destroyAllWindows()
 
@@ -919,26 +919,57 @@ def mouse_callback(event, x, y, flags, param):
             history_frames = history.get_history(clicked_id)
             print(f"[HISTORY] 📦 {len(history_frames)}개 프레임 발견, {target}장 수집 시도...")
             
+            skip_reasons = {"too_small": 0, "add_failed": 0, "quality": 0}
+            
             for crop, bbox, fidx in reversed(history_frames):  # 최근부터
                 if collected >= target:
                     break
                 
-                h, w = crop.shape[:2]
-                added = selected_bank.add_from_frame_banded5_improved(
-                    crop, (0, 0, w, h),  # crop 전체
-                    origin_seg=clicked_seg,
-                    origin_cam=cam_name,
-                    cam_id=cam_name,
-                    use_whitening=True
-                )
+                # ✅ crop 품질 검증
+                if crop is None or crop.size == 0:
+                    skip_reasons["quality"] += 1
+                    continue
                 
-                if added:
-                    collected += 1
+                h, w = crop.shape[:2]
+                
+                # ✅ 최소 크기 체크 (너무 작은 crop은 제외)
+                if h < 30 or w < 30:  # 20 → 30으로 여유있게
+                    skip_reasons["too_small"] += 1
+                    continue
+                
+                # ✅ 디버깅: crop 정보 출력
+                if collected == 0:  # 첫 시도만 출력
+                    print(f"[HISTORY] crop 시도: size={w}x{h}, fidx={fidx}")
+                
+                try:
+                    # ✅ 핵심 수정: center_ratio=1.0 (이미 crop된 이미지이므로 전체 사용)
+                    added = selected_bank.add_from_frame_banded5_improved(
+                        crop, (0, 0, w, h),  # crop 전체
+                        pad=0,               # ✅ pad도 0으로 (이미 crop됨)
+                        center_ratio=1.0,    # ✅ 전체 사용
+                        origin_seg=clicked_seg,
+                        origin_cam=cam_name,
+                        cam_id=cam_name,
+                        use_whitening=True
+                    )
+                    
+                    if added:
+                        collected += 1
+                        if collected <= 2:  # 처음 2개만 로그
+                            print(f"[HISTORY] ✅ {collected}/{target} 수집 (size={w}x{h})")
+                    else:
+                        skip_reasons["add_failed"] += 1
+                        
+                except Exception as e:
+                    skip_reasons["add_failed"] += 1
+                    if collected == 0:  # 첫 실패만 출력
+                        print(f"[HISTORY] ⚠️  add 실패: {e}")
             
             if collected > 0:
-                print(f"[HISTORY] ✅ {collected}/{target}장 수집 완료")
+                print(f"[HISTORY] ✅ 최종 {collected}/{target}장 수집 완료")
             else:
-                print(f"[HISTORY] ⚠️  히스토리 수집 실패, 실시간 수집 시작")
+                print(f"[HISTORY] ❌ 히스토리 수집 실패: {skip_reasons}")
+                print(f"[HISTORY] → 실시간 수집으로 전환")
             
         else:
             # 선택 해제
@@ -992,24 +1023,55 @@ def mouse_callback(event, x, y, flags, param):
             
             print(f"[HISTORY] 📦 {len(history_frames)}개 프레임 발견, {target}장 수집 시도...")
             
+            skip_reasons = {"too_small": 0, "add_failed": 0, "quality": 0}
+            
             for crop, bbox, fidx in reversed(history_frames):
                 if collected >= target:
                     break
                 
+                # ✅ crop 품질 검증
+                if crop is None or crop.size == 0:
+                    skip_reasons["quality"] += 1
+                    continue
+                
                 h, w = crop.shape[:2]
-                if selected_bank.add_from_frame_banded5_improved(
-                    crop, (0, 0, w, h),
-                    origin_seg="C",
-                    origin_cam=switcher.current_name,
-                    cam_id=switcher.current_name,
-                    use_whitening=True
-                ):
-                    collected += 1
+                
+                # ✅ 최소 크기 체크
+                if h < 30 or w < 30:
+                    skip_reasons["too_small"] += 1
+                    continue
+                
+                # ✅ 디버깅
+                if collected == 0:
+                    print(f"[HISTORY] crop 시도: size={w}x{h}, fidx={fidx}")
+                
+                try:
+                    # ✅ center_ratio=1.0, pad=0 적용
+                    if selected_bank.add_from_frame_banded5_improved(
+                        crop, (0, 0, w, h),
+                        pad=0,
+                        center_ratio=1.0,
+                        origin_seg="C",
+                        origin_cam=switcher.current_name,
+                        cam_id=switcher.current_name,
+                        use_whitening=True
+                    ):
+                        collected += 1
+                        if collected <= 2:
+                            print(f"[HISTORY] ✅ {collected}/{target} 수집 (size={w}x{h})")
+                    else:
+                        skip_reasons["add_failed"] += 1
+                        
+                except Exception as e:
+                    skip_reasons["add_failed"] += 1
+                    if collected == 0:
+                        print(f"[HISTORY] ⚠️  add 실패: {e}")
             
             if collected > 0:
-                print(f"[HISTORY] ✅ {collected}/{target}장 수집 완료")
+                print(f"[HISTORY] ✅ 최종 {collected}/{target}장 수집 완료")
             else:
-                print(f"[HISTORY] ⚠️  히스토리 수집 실패, 실시간 수집 시작")
+                print(f"[HISTORY] ❌ 히스토리 수집 실패: {skip_reasons}")
+                print(f"[HISTORY] → 실시간 수집으로 전환")
             
         else:
             # 선택 해제

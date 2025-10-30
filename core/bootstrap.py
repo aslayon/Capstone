@@ -12,13 +12,16 @@ FETCHER_PATH = Path("API에서영상받아오기.py")
 OUT_JSON = Path(r"data\cctv_list_4.json")  # fetcher가 생성하는 파일명과 맞춤
 
 def _run_fetcher_once(python_exe: Optional[str] = None, timeout: int = 20) -> bool:
-    """API에서영상받아오기.py를 한 번 실행해서 최신 JSON을 생성."""
-    if not FETCHER_PATH.exists():
+    """API fetcher를 한 번 실행해서 최신 JSON을 생성."""
+    # Prefer restructured path if present
+    preferred = Path("scripts") / "api_video_fetch.py"
+    fetcher = preferred if preferred.exists() else FETCHER_PATH
+    if not fetcher.exists():
         return False
     py = python_exe or sys.executable
     try:
         proc = subprocess.run(
-            [py, str(FETCHER_PATH)],
+            [py, str(fetcher)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,

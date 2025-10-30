@@ -3,13 +3,14 @@ import os, json
 import cv2
 import numpy as np
 from pathlib import Path
+from core.config import CAM_STATS_PATH
 from collections import defaultdict, deque
 
 # ----------------------------
 # A1. 카메라별 러닝 통계 (μ, σ) 저장/로드
 # ----------------------------
 class CamStats:
-    def __init__(self, save_path="cam_stats.json", momentum=0.1):
+    def __init__(self, save_path: str | Path = CAM_STATS_PATH, momentum=0.1):
         self.path = Path(save_path)
         self.momentum = float(momentum)
         self.mu = {}   # cam_id -> np.array(D,)

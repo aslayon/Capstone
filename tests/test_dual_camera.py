@@ -145,7 +145,7 @@ class OptimizedDualCameraSystem:
     def _load_connections(self):
         """연결 관계 로드 (기존과 동일)"""
         try:
-            with open("cctv_graph_connections.json", 'r', encoding='utf-8') as f:
+            with open("config/cctv_graph_connections.json", 'r', encoding='utf-8') as f:
                 connections = json.load(f)
             return connections
         except Exception as e:

@@ -26,7 +26,7 @@ class SwitchController:
                  current_name: str,
                  current_url: str,
                  api_key: str,
-                 graph_path: str = "data/cctv_graph_connections.json",
+                 graph_path: str = "config/cctv_graph_connections.json",
                  list_path: str  = "data/cctv_list_4.json",
                  env_path: str   = ".env"):
         self.env_path = env_path
@@ -300,7 +300,7 @@ if __name__ == "__main__":
         current_name=cfg["CURRENT_CCTV_NAME"],
         current_url=cfg["CURRENT_CCTV_URL"],
         api_key=cfg["ITS_API_KEY"],
-        graph_path="data/cctv_graph_connections.json",
+        graph_path="config/cctv_graph_connections.json",
         list_path="data/cctv_list_4.json"
     )
     

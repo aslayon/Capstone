@@ -2,7 +2,7 @@
 
 
 #고삼터널-포천
-from DongOh.CCTV.CCTV_web.flask_template.app import run
+from examples.flask_demo.flask_template.app import run
 
 
 if __name__ == "__main__": 
