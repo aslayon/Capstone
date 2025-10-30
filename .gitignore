@@ -18,4 +18,7 @@ cctv_list*.xlsx
 
 __pycache__/
 *.pyc
+reid_logs_5band/
+reid_crops/
 
+reid_logs/

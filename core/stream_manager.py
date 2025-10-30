@@ -1,7 +1,20 @@
 """
-HLS 스트림 매니저 - 끊김 없는 재생을 위한 개선 버전
-파일명: stream_manager.py
-위치: core/stream_manager.py
+범용 스트림 매니저 - HLS 스트림과 MP4 파일 모두 지원
+파일명: universal_stream_manager.py
+위치: core/universal_stream_manager.py
+
+사용법:
+    # HLS 스트림
+    manager = UniversalStreamManager(api_key="your_key")
+    manager.start("카메라명", "http://example.com/stream.m3u8")
+    
+    # MP4 파일
+    manager = UniversalStreamManager()
+    manager.start("비디오1", "/path/to/video.mp4")
+    
+    # RTSP 스트림
+    manager = UniversalStreamManager()
+    manager.start("RTSP카메라", "rtsp://192.168.1.100:554/stream")
 """
 
 import cv2
@@ -11,29 +24,36 @@ import time
 import threading
 import queue
 from collections import deque
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
+from pathlib import Path
 import os
 from dotenv import load_dotenv
 
-class HLSStreamManager:
-    """HLS 스트림 끊김 문제를 해결하는 스트림 매니저"""
+
+class UniversalStreamManager:
+    """HLS, MP4, RTSP 등 모든 스트림 소스를 지원하는 범용 매니저"""
     
-    def __init__(self, api_key: str, update_interval: int = 20):
+    def __init__(self, api_key: Optional[str] = None, update_interval: int = 20):
         """
         Args:
-            api_key: ITS API 키
-            update_interval: URL 갱신 주기 (초) - HLS 세그먼트 길이 고려
+            api_key: ITS API 키 (HLS 스트림용, None이면 API 미사용)
+            update_interval: HLS URL 갱신 주기 (초)
         """
         self.api_key = api_key
         self.update_interval = update_interval
+        
+        # 스트림 타입 감지
+        self.source_type = None  # "hls", "mp4", "rtsp", "webcam"
+        self.is_file = False
+        self.file_loop = True  # MP4 반복 재생 여부
         
         # 스트림 관리
         self.current_url = None
         self.current_cap = None
         self.backup_cap = None
         
-        # 프레임 버퍼 (끊김 방지)
-        self.frame_buffer = queue.Queue(maxsize=60)  # 2초 분량
+        # 프레임 버퍼
+        self.frame_buffer = queue.Queue(maxsize=60)
         self.last_valid_frame = None
         
         # 스레드 관리
@@ -47,33 +67,72 @@ class HLSStreamManager:
             'stream_reconnects': 0,
             'frames_read': 0,
             'buffer_underruns': 0,
-            'last_update_time': 0
+            'last_update_time': 0,
+            'source_type': 'unknown'
         }
         
-        # HLS 점프 감지
-        self.jump_detector = HLSJumpDetector()
-        
-        print("🚀 HLS 스트림 매니저 초기화")
+        print("🚀 범용 스트림 매니저 초기화")
     
-    def start(self, cctv_name: str, initial_url: str) -> bool:
-        """스트림 시작"""
-        print(f"📡 스트림 시작: {cctv_name}")
+    def _detect_source_type(self, url: str) -> str:
+        """URL/경로로부터 소스 타입 자동 감지"""
+        url_lower = url.lower()
         
+        # 파일 경로 체크
+        if os.path.isfile(url):
+            ext = Path(url).suffix.lower()
+            if ext in ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.webm']:
+                return 'mp4'
+        
+        # URL 프로토콜 체크
+        if url_lower.startswith('rtsp://'):
+            return 'rtsp'
+        elif url_lower.startswith('rtmp://'):
+            return 'rtmp'
+        elif url_lower.endswith('.m3u8') or 'playlist.m3u8' in url_lower:
+            return 'hls'
+        elif any(ext in url_lower for ext in ['.mp4', '.avi', '.mov']):
+            return 'mp4'
+        elif url.isdigit():
+            return 'webcam'
+        
+        # 기본값: HLS로 가정
+        return 'hls'
+    
+    def start(self, cctv_name: str, source: str, loop: bool = True) -> bool:
+        """
+        스트림/파일 시작
+        
+        Args:
+            cctv_name: 카메라/소스 이름
+            source: URL 또는 파일 경로
+            loop: MP4 파일 반복 재생 여부
+        """
         self.cctv_name = cctv_name
-        self.current_url = initial_url
+        self.current_url = source
+        self.file_loop = loop
         self.running = True
         
+        # 소스 타입 감지
+        self.source_type = self._detect_source_type(source)
+        self.is_file = self.source_type == 'mp4'
+        self.stats['source_type'] = self.source_type
+        
+        print(f"📡 스트림 시작: {cctv_name}")
+        print(f"   타입: {self.source_type}")
+        print(f"   소스: {source}")
+        
         # 초기 연결
-        if not self._connect_stream(initial_url):
+        if not self._connect_stream(source):
             print("❌ 초기 스트림 연결 실패")
             return False
         
-        # URL 갱신 스레드 시작
-        self.url_updater_thread = threading.Thread(
-            target=self._url_update_loop,
-            daemon=True
-        )
-        self.url_updater_thread.start()
+        # HLS만 URL 갱신 스레드 사용
+        if self.source_type == 'hls' and self.api_key:
+            self.url_updater_thread = threading.Thread(
+                target=self._url_update_loop,
+                daemon=True
+            )
+            self.url_updater_thread.start()
         
         # 프레임 읽기 스레드 시작
         self.frame_reader_thread = threading.Thread(
@@ -85,21 +144,34 @@ class HLSStreamManager:
         print("✅ 스트림 매니저 시작 완료")
         return True
     
-    def _connect_stream(self, url: str) -> bool:
-        """스트림 연결 (최적화된 설정)"""
+    def _connect_stream(self, source: str) -> bool:
+        """스트림/파일 연결"""
         try:
-            cap = cv2.VideoCapture(url)
+            # 파일 경로면 정수로 변환 시도 (웹캠)
+            if source.isdigit():
+                source = int(source)
+            
+            cap = cv2.VideoCapture(source)
             
             if not cap.isOpened():
+                print(f"❌ 소스 열기 실패: {source}")
                 return False
             
-            # HLS 최적화 설정
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # 최소 버퍼
+            # 설정 최적화
+            if self.source_type == 'hls':
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # HLS: 최소 버퍼
+            elif self.source_type == 'mp4':
+                # MP4: 기본 설정 사용
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                fps = cap.get(cv2.CAP_PROP_FPS)
+                duration = total_frames / fps if fps > 0 else 0
+                print(f"   파일 정보: {total_frames} 프레임, {fps:.1f} FPS, {duration:.1f}초")
             
             # 첫 프레임 테스트
             ret, frame = cap.read()
             if not ret:
                 cap.release()
+                print("❌ 첫 프레임 읽기 실패")
                 return False
             
             # 백업으로 현재 cap 저장
@@ -109,7 +181,7 @@ class HLSStreamManager:
             self.current_cap = cap
             self.last_valid_frame = frame
             
-            print(f"✅ 스트림 연결 성공")
+            print(f"✅ 스트림 연결 성공 ({frame.shape[1]}x{frame.shape[0]})")
             return True
             
         except Exception as e:
@@ -117,12 +189,15 @@ class HLSStreamManager:
             return False
     
     def _url_update_loop(self):
-        """URL 주기적 갱신 스레드"""
+        """HLS URL 주기적 갱신 스레드"""
+        if self.source_type != 'hls' or not self.api_key:
+            return
+        
         print("🔄 URL 갱신 스레드 시작")
         
         while self.running:
             try:
-                # 대기 (첫 실행은 즉시)
+                # 대기
                 if self.stats['url_updates'] > 0:
                     time.sleep(self.update_interval)
                 
@@ -132,34 +207,29 @@ class HLSStreamManager:
                 if new_url and new_url != self.current_url:
                     print(f"🔄 새 URL 획득 (갱신 #{self.stats['url_updates'] + 1})")
                     
-                    # 새 스트림 연결 시도
                     if self._connect_stream(new_url):
                         self.current_url = new_url
                         self.stats['url_updates'] += 1
                         self.stats['last_update_time'] = time.time()
                         
-                        # 이전 백업 정리
                         if self.backup_cap:
                             self.backup_cap.release()
                             self.backup_cap = None
-                    else:
-                        print("⚠️ 새 URL 연결 실패, 현재 스트림 유지")
                 
             except Exception as e:
                 print(f"❌ URL 갱신 오류: {e}")
-                time.sleep(5)  # 오류 시 잠시 대기
+                time.sleep(5)
     
     def _fetch_new_url(self) -> Optional[str]:
-        """API에서 새 URL 가져오기"""
+        """HLS API에서 새 URL 가져오기"""
+        if not self.api_key:
+            return None
+        
         try:
-            # 실제 API 호출 (좌표 기반)
             url = "https://openapi.its.go.kr:9443/cctvInfo"
-            
-            # cctv_name으로 좌표 찾기 (실제로는 DB나 캐시에서)
-            # 여기서는 예시 좌표 사용
             params = {
                 "apiKey": self.api_key,
-                "type": "all", 
+                "type": "all",
                 "cctvType": "1",
                 "minX": "127.0",
                 "maxX": "127.1",
@@ -181,28 +251,40 @@ class HLSStreamManager:
         except Exception as e:
             print(f"⚠️ API 호출 실패: {e}")
             return None
-    # 클래스 내부에 추가
-    def switch_to(self, cctv_name: str, new_url: str) -> bool:
+    
+    def switch_to(self, cctv_name: str, new_source: str) -> bool:
         """
-        실행 중 부드러운 전환: 스레드 재시작 없이 현재 cap만 새 URL로 교체.
+        실행 중 부드러운 전환
+        
+        Args:
+            cctv_name: 새 카메라/소스 이름
+            new_source: 새 URL/파일 경로
         """
+        print(f"🔄 전환 중: {self.cctv_name} -> {cctv_name}")
+        
         self.cctv_name = cctv_name
-        ok = self._connect_stream(new_url)  # 내부에서 backup_cap 교체
+        self.source_type = self._detect_source_type(new_source)
+        self.is_file = self.source_type == 'mp4'
+        self.stats['source_type'] = self.source_type
+        
+        ok = self._connect_stream(new_source)
+        
         if ok:
-            self.current_url = new_url
+            self.current_url = new_source
             self.stats['url_updates'] += 1
             self.stats['last_update_time'] = time.time()
+            print(f"✅ 전환 완료: {self.source_type}")
         else:
-            print("[HLSStreamManager] switch_to() failed")
+            print("[UniversalStreamManager] switch_to() 실패")
+        
         return ok
-
-
+    
     def _frame_reader_loop(self):
-        """프레임 읽기 스레드 (버퍼링)"""
+        """프레임 읽기 스레드"""
         print("📹 프레임 읽기 스레드 시작")
         
         consecutive_failures = 0
-        max_failures = 30  # 1초 정도
+        max_failures = 30
         
         while self.running:
             try:
@@ -214,12 +296,11 @@ class HLSStreamManager:
                 ret, frame = self.current_cap.read()
                 
                 if ret:
-                    # 성공: 버퍼에 추가
                     consecutive_failures = 0
                     self.last_valid_frame = frame
                     self.stats['frames_read'] += 1
                     
-                    # 버퍼가 가득 찬 경우 오래된 프레임 제거
+                    # 버퍼 관리
                     if self.frame_buffer.full():
                         try:
                             self.frame_buffer.get_nowait()
@@ -228,18 +309,23 @@ class HLSStreamManager:
                     
                     self.frame_buffer.put(frame)
                     
-                    # HLS 점프 감지
-                    if self.jump_detector.detect_jump(frame):
-                        print("🔥 HLS 점프 감지! 스트림 연속성 문제")
-                        self.stats['stream_reconnects'] += 1
-                    
                 else:
-                    # 실패: 카운트 증가
+                    # MP4 파일 끝 처리
+                    if self.is_file:
+                        if self.file_loop:
+                            # 반복 재생
+                            print("🔁 파일 끝, 처음부터 재생")
+                            self.current_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                            continue
+                        else:
+                            print("⏹️ 파일 재생 완료")
+                            break
+                    
+                    # 스트림 실패 처리
                     consecutive_failures += 1
                     
-                    # 너무 많이 실패하면 재연결 필요
                     if consecutive_failures >= max_failures:
-                        print("⚠️ 프레임 읽기 실패 지속, 스트림 상태 확인")
+                        print("⚠️ 프레임 읽기 실패 지속")
                         consecutive_failures = 0
                         
                         # 백업 스트림 시도
@@ -250,7 +336,7 @@ class HLSStreamManager:
                         time.sleep(0.5)
                 
                 # CPU 부하 방지
-                time.sleep(0.03)  # ~30 FPS
+                time.sleep(0.03)
                 
             except Exception as e:
                 print(f"❌ 프레임 읽기 오류: {e}")
@@ -259,19 +345,15 @@ class HLSStreamManager:
     def get_frame(self, timeout: float = 0.1) -> Optional[np.ndarray]:
         """
         버퍼에서 프레임 가져오기
-        버퍼가 비어있으면 마지막 유효 프레임 반환 (끊김 방지)
         """
         try:
-            # 버퍼에서 프레임 가져오기
             frame = self.frame_buffer.get(timeout=timeout)
             return frame
             
         except queue.Empty:
-            # 버퍼가 비어있으면 마지막 프레임 반환
             self.stats['buffer_underruns'] += 1
             
             if self.last_valid_frame is not None:
-                # 마지막 프레임 복사본 반환
                 return self.last_valid_frame.copy()
             
             return None
@@ -281,6 +363,7 @@ class HLSStreamManager:
         buffer_size = self.frame_buffer.qsize()
         
         health = {
+            'source_type': self.source_type,
             'is_connected': self.current_cap is not None and self.current_cap.isOpened(),
             'buffer_size': buffer_size,
             'buffer_health': 'good' if buffer_size > 20 else 'low' if buffer_size > 5 else 'critical',
@@ -290,6 +373,13 @@ class HLSStreamManager:
             'buffer_underruns': self.stats['buffer_underruns'],
             'time_since_update': time.time() - self.stats['last_update_time'] if self.stats['last_update_time'] > 0 else 0
         }
+        
+        # MP4 파일 진행률 추가
+        if self.is_file and self.current_cap:
+            current_frame = self.current_cap.get(cv2.CAP_PROP_POS_FRAMES)
+            total_frames = self.current_cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            if total_frames > 0:
+                health['progress'] = f"{current_frame:.0f}/{total_frames:.0f} ({current_frame/total_frames*100:.1f}%)"
         
         return health
     
@@ -323,139 +413,75 @@ class HLSStreamManager:
         print("✅ 스트림 매니저 중지 완료")
 
 
-class HLSJumpDetector:
-    """HLS 세그먼트 점프 감지기"""
-    
-    def __init__(self, window_size: int = 30):
-        self.frame_times = deque(maxlen=window_size)
-        self.last_frame_time = None
-        self.jump_count = 0
-    
-    def detect_jump(self, frame: np.ndarray) -> bool:
-        """프레임 간 시간 간격으로 점프 감지"""
-        current_time = time.time()
-        
-        if self.last_frame_time is not None:
-            interval = current_time - self.last_frame_time
-            self.frame_times.append(interval)
-            
-            if len(self.frame_times) > 10:
-                avg_interval = sum(self.frame_times) / len(self.frame_times)
-                
-                # 평균의 3배 이상 간격이면 점프
-                if interval > avg_interval * 3 and interval > 0.5:
-                    self.jump_count += 1
-                    print(f"⚡ 점프 감지 #{self.jump_count}: {interval:.2f}초 (평균: {avg_interval:.3f}초)")
-                    self.last_frame_time = current_time
-                    return True
-        
-        self.last_frame_time = current_time
-        return False
+# ============================================================
+# 기존 HLSStreamManager와 호환성 유지를 위한 별칭
+# ============================================================
+HLSStreamManager = UniversalStreamManager
 
 
-# 통합 함수: 기존 시스템과 연동
-def integrate_with_existing_system(system):
-    """기존 IntegratedHandoverSystem과 통합"""
-    
-    # 환경 변수 로드
-    load_dotenv()
-    api_key = os.getenv("ITS_API_KEY")
-    
-    if not api_key:
-        print("❌ ITS_API_KEY가 설정되지 않았습니다")
-        return False
-    
-    # HLS 스트림 매니저 생성
-    stream_manager = HLSStreamManager(api_key, update_interval=20)
-    
-    # 기존 시스템에 통합
-    system.stream_manager = stream_manager
-    
-    # 기존 get_frames 메서드 오버라이드
-    original_get_frames = system.get_frames
-    
-    def new_get_frames():
-        """개선된 프레임 가져오기"""
-        if hasattr(system, 'stream_manager'):
-            frame = system.stream_manager.get_frame()
-            if frame is not None:
-                return frame, None
-        
-        # 폴백: 기존 방식
-        return original_get_frames()
-    
-    system.get_frames = new_get_frames
-    
-    # 기존 start_camera 메서드 오버라이드
-    original_start_camera = system.start_camera
-    
-    def new_start_camera(cctv_name: str, stream_url: str) -> bool:
-        """개선된 카메라 시작"""
-        # 스트림 매니저로 시작
-        if hasattr(system, 'stream_manager'):
-            success = system.stream_manager.start(cctv_name, stream_url)
-            if success:
-                # 기존 시스템 설정도 수행
-                return original_start_camera(cctv_name, stream_url)
-        
-        return False
-    
-    system.start_camera = new_start_camera
-    
-    print("✅ HLS 스트림 매니저 통합 완료")
-    return True
-
-
+# ============================================================
 # 사용 예시
+# ============================================================
 if __name__ == "__main__":
     load_dotenv()
     
-    # 단독 테스트
+    # 예시 1: HLS 스트림
+    print("\n" + "="*60)
+    print("예시 1: HLS 스트림")
+    print("="*60)
+    
     api_key = os.getenv("ITS_API_KEY")
     stream_url = os.getenv("CURRENT_CCTV_URL")
-    cctv_name = os.getenv("CURRENT_CCTV_NAME", "죽평")
     
-    if not api_key or not stream_url:
-        print("❌ 환경 변수를 설정하세요")
-        exit(1)
-    
-    # 스트림 매니저 테스트
-    manager = HLSStreamManager(api_key)
-    
-    if manager.start(cctv_name, stream_url):
-        print("📹 스트림 테스트 시작 (30초간)")
-        
-        start_time = time.time()
-        frame_count = 0
-        
-        while time.time() - start_time < 30:
-            frame = manager.get_frame()
+    if api_key and stream_url:
+        manager = UniversalStreamManager(api_key=api_key)
+        if manager.start("죽평", stream_url):
+            print("\n📹 5초간 스트림 테스트...")
             
-            if frame is not None:
-                frame_count += 1
-                
-                # 10프레임마다 상태 출력
-                if frame_count % 10 == 0:
+            for i in range(150):  # 5초 (30fps)
+                frame = manager.get_frame()
+                if frame is not None and i % 30 == 0:
                     health = manager.get_stream_health()
-                    print(f"프레임 {frame_count}: 버퍼={health['buffer_size']}, "
-                          f"상태={health['buffer_health']}, "
-                          f"갱신={health['url_updates']}회")
-                
-                # 화면 표시 (선택사항)
-                # cv2.imshow("Stream Test", frame)
-                # if cv2.waitKey(1) & 0xFF == 27:  # ESC
-                #     break
+                    print(f"  {i//30 + 1}초: 버퍼={health['buffer_size']}, 타입={health['source_type']}")
+                time.sleep(0.03)
             
-            time.sleep(0.03)  # ~30 FPS
-        
-        manager.stop()
-        
-        # 최종 통계
-        print(f"\n📊 테스트 완료:")
-        print(f"  총 프레임: {frame_count}")
-        print(f"  평균 FPS: {frame_count / 30:.1f}")
-        
-        final_health = manager.get_stream_health()
-        print(f"  URL 갱신: {final_health['url_updates']}회")
-        print(f"  재연결: {final_health['reconnects']}회")
-        print(f"  버퍼 언더런: {final_health['buffer_underruns']}회")
+            manager.stop()
+    
+    # 예시 2: MP4 파일
+    print("\n" + "="*60)
+    print("예시 2: MP4 파일")
+    print("="*60)
+    
+    # 테스트용 MP4 파일이 있다면
+    test_video = "test_video.mp4"
+    if os.path.exists(test_video):
+        manager = UniversalStreamManager()
+        if manager.start("테스트비디오", test_video, loop=True):
+            print("\n📹 3초간 파일 재생 테스트...")
+            
+            for i in range(90):
+                frame = manager.get_frame()
+                if frame is not None and i % 30 == 0:
+                    health = manager.get_stream_health()
+                    print(f"  {i//30 + 1}초: {health.get('progress', 'N/A')}")
+                time.sleep(0.03)
+            
+            manager.stop()
+    else:
+        print(f"⚠️  테스트 파일 없음: {test_video}")
+    
+    # 예시 3: 웹캠
+    print("\n" + "="*60)
+    print("예시 3: 웹캠 (선택사항)")
+    print("="*60)
+    print("웹캠 테스트를 원하시면 주석을 해제하세요")
+    
+    # manager = UniversalStreamManager()
+    # if manager.start("웹캠", "0"):  # "0"은 기본 웹캠
+    #     print("\n📹 3초간 웹캠 테스트...")
+    #     for i in range(90):
+    #         frame = manager.get_frame()
+    #         if frame is not None and i % 30 == 0:
+    #             print(f"  {i//30 + 1}초: 프레임 {frame.shape}")
+    #         time.sleep(0.03)
+    #     manager.stop()

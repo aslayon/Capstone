@@ -2,7 +2,10 @@
 JSON파일에서 URL을 읽어와서 설정 -> 현재 딜레이가 발생하는 문제
 버퍼? 뭐 쓰면 해결된다고 했던거 같은데 확인점
 
+3344
 
+
+876 1163
 app.py 실행 후 실행안되면
 터미널에서
 cd ~~~/DongOh/CCTV/CCTV_web/flask-template로 옮기고

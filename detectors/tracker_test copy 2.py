@@ -2,83 +2,21 @@ import numpy as np
 from filterpy.kalman import KalmanFilter
 from scipy.optimize import linear_sum_assignment
 import itertools
-import os, json
-from pathlib import Path
 
-def _load_ultralytics_bytetrack_defaults():
-    """
-    1) 로컬/패키지의 bytetrack.yaml 찾아 로드
-    2) 없으면 Ultralytics 퍼블릭 기본값으로 폴백
-    """
-    import yaml
-
-    candidates = [
-        Path("bytetrack.yaml"),
-        Path("ultralytics/cfg/trackers/bytetrack.yaml"),
-        Path(os.path.dirname(__file__)) / "bytetrack.yaml",
-    ]
-    try:
-        import ultralytics, inspect
-        upath = Path(inspect.getfile(ultralytics)).parent / "cfg" / "trackers" / "bytetrack.yaml"
-        candidates.append(upath)
-    except Exception:
-        pass
-
-    for p in candidates:
-        if p.is_file():
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f) or {}
-                return {
-                    "track_high_thresh": float(data.get("track_high_thresh", 0.5)),
-                    "track_low_thresh":  float(data.get("track_low_thresh", 0.1)),
-                    "new_track_thresh":  float(data.get("new_track_thresh", 0.6)),
-                    "track_buffer":      int(data.get("track_buffer", 30)),
-                    "match_thresh":      float(data.get("match_thresh", 0.8)),
-                }
-            except Exception:
-                continue
-
-    # 폴백: Ultralytics 공개 기본값
-    return {
-        "track_high_thresh": 0.5,
-        "track_low_thresh":  0.1,
-        "new_track_thresh":  0.6,
-        "track_buffer":      30,
-        "match_thresh":      0.8,
-    }
-
-
+# 각 트래커별 독립적인 선택된 ID 관리
 class MultiTracker:
-    def __init__(self, max_age=30, iou_threshold=0.25, min_hits=1, show_newborn=True,
-                track_high_thresh=None, track_low_thresh=None, new_track_thresh=None,
-                match_thresh=None, track_buffer=None, center_distance_threshold=100.0):
-
-        # 퍼블릭 디폴트 로드
-        defaults = _load_ultralytics_bytetrack_defaults()
-
-        self.track_high_thresh = float(track_high_thresh if track_high_thresh is not None else defaults["track_high_thresh"])
-        self.track_low_thresh  = float(track_low_thresh  if track_low_thresh  is not None else defaults["track_low_thresh"])
-        self.new_track_thresh  = float(new_track_thresh  if new_track_thresh  is not None else defaults["new_track_thresh"])
-        self.track_buffer      = int  (track_buffer      if track_buffer      is not None else defaults["track_buffer"])
-        self.match_thresh      = float(match_thresh      if match_thresh      is not None else defaults["match_thresh"])
-
-        # ✅ 개선: IOU 임계값을 낮추고 중심점 거리 기반 보조 매칭 추가
-        self.max_age = int(max_age)
-        self.iou_threshold = float(iou_threshold)  # 0.25로 낮춤
-        self.center_distance_threshold = float(center_distance_threshold)  # 새로 추가
-        self.min_hits = int(min_hits)
-        self.show_newborn = bool(show_newborn)
+    def __init__(self, max_age=30, iou_threshold=0.3, min_hits=1, show_newborn=True):
+        self.max_age = max_age
+        self.iou_threshold = iou_threshold
         self.tracks = []
-        self._last_results = []
-        self._last_tlbr_by_id = {}
-        self.selected_id = None
-        self._frame_id = 0
+        self.selected_id = None  # 인스턴스별 선택된 ID
+        
+        
+        self.min_hits = min_hits
+        self.show_newborn = show_newborn
+        self.newborn = {}  
 
     def update(self, detections):
-        """
-        개선된 업데이트: IOU + 중심점 거리 하이브리드 매칭
-        """
         self.newborn = {}
         predicted = [track.predict() for track in self.tracks]
         matched, unmatched_dets, unmatched_tracks = self._match(detections, predicted)
@@ -87,43 +25,18 @@ class MultiTracker:
         for det_idx, track_idx in matched:
             self.tracks[track_idx].update(detections[det_idx][:4])
 
-        # ✅ 개선: 매칭 안 된 detection 중 중심점 거리로 재매칭 시도
-        remaining_dets = []
+        # 매칭 안 된 det는 새 트랙으로 즉시 생성
         for idx in unmatched_dets:
-            det_center = self._get_center(detections[idx][:4])
-            best_track_idx = None
-            best_distance = self.center_distance_threshold
-            
-            for track_idx in unmatched_tracks:
-                if track_idx >= len(self.tracks):
-                    continue
-                track_center = self._get_center(self.tracks[track_idx].get_bbox())
-                distance = np.sqrt((det_center[0] - track_center[0])**2 + 
-                                 (det_center[1] - track_center[1])**2)
-                
-                if distance < best_distance:
-                    best_distance = distance
-                    best_track_idx = track_idx
-            
-            if best_track_idx is not None:
-                # 중심점 거리로 매칭 성공
-                self.tracks[best_track_idx].update(detections[idx][:4])
-                unmatched_tracks.remove(best_track_idx)
-            else:
-                remaining_dets.append(idx)
-
-        # 여전히 매칭 안 된 det는 새 트랙으로 생성
-        for idx in remaining_dets:
             t = Track(detections[idx][:4])
             self.tracks.append(t)
             if self.show_newborn:
                 x1,y1,x2,y2 = t.get_bbox()
-                self.newborn[t.id] = (x1,y1,x2,y2)
+                self.newborn[t.id] = (x1,y1,x2,y2)  # 같은 프레임에 바로 그림
 
         # 오래된 트랙 정리
         self.tracks = [t for t in self.tracks if t.time_since_update < self.max_age]
 
-        # 결과 구성
+        # 결과 구성: min_hits 충족 or (show_newborn이고 hits==1인 신생 트랙)
         results = []
         for t in self.tracks:
             if t.time_since_update == 0:
@@ -134,12 +47,14 @@ class MultiTracker:
         return results
 
     def predict_only(self):
-        """탐지 없이 예측만 수행"""
+        """탐지 없이 예측만 수행 (부드러운 움직임을 위해)"""
         for track in self.tracks:
             track.predict()
         
+        # 너무 오래된 트랙 제거
         self.tracks = [t for t in self.tracks if t.time_since_update < self.max_age]
         
+        # 모든 트랙의 현재 위치 반환
         results = []
         for t in self.tracks:
             x1, y1, x2, y2 = t.get_bbox()
@@ -147,12 +62,7 @@ class MultiTracker:
         
         return results
 
-    def _get_center(self, bbox):
-        """bbox의 중심점 반환"""
-        return ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
-
     def _match(self, detections, predicted):
-        """IOU 기반 매칭"""
         if len(predicted) == 0 or len(detections) == 0:
             return [], list(range(len(detections))), list(range(len(predicted)))
 
@@ -168,20 +78,12 @@ class MultiTracker:
         unmatched_tracks = list(set(range(len(predicted))) - {m[1] for m in matched_indices})
 
         matches = [m for m in matched_indices if iou_matrix[m[0], m[1]] >= self.iou_threshold]
-        
-        # IOU 매칭 실패 시 unmatched로 분류
-        failed_matches_det = [m[0] for m in matched_indices if iou_matrix[m[0], m[1]] < self.iou_threshold]
-        failed_matches_track = [m[1] for m in matched_indices if iou_matrix[m[0], m[1]] < self.iou_threshold]
-        unmatched_dets.extend(failed_matches_det)
-        unmatched_tracks.extend(failed_matches_track)
-        
         return matches, unmatched_dets, unmatched_tracks
 
     def _convert_to_bbox(self, pred):
-        """Kalman 예측값을 bbox로 변환"""
         cx, cy, s, r = pred
-        val = max(0.0, s * r)
-        w = max(1e-6, np.sqrt(val))
+        val = max(0.0, s * r)        # ✅ 음수 방지
+        w = max(1e-6, np.sqrt(val))  # sqrt 전에 clamp
         h = max(1e-6, s / w if w > 1e-12 else 1e-6)
         x1 = cx - w / 2
         y1 = cy - h / 2
@@ -189,8 +91,8 @@ class MultiTracker:
         y2 = cy + h / 2
         return (x1, y1, x2, y2)
 
+
     def _iou(self, bb_test, bb_gt):
-        """IOU 계산"""
         xx1 = max(bb_test[0], bb_gt[0])
         yy1 = max(bb_test[1], bb_gt[1])
         xx2 = min(bb_test[2], bb_gt[2])
@@ -204,7 +106,7 @@ class MultiTracker:
 
     def select_track_by_point(self, x, y):
         """특정 좌표의 차량을 선택/해제"""
-        if x < 0 or y < 0:
+        if x < 0 or y < 0:  # 강제 해제
             if self.selected_id is not None:
                 print(f"[INFO] 차량 선택 해제됨 (이전 ID: {self.selected_id})")
                 self.selected_id = None
@@ -220,6 +122,7 @@ class MultiTracker:
                     print(f"[INFO] 관심 차량 선택됨 (ID: {track.id})")
                 return
         
+        # 클릭한 위치에 차량이 없으면 선택 해제
         if self.selected_id is not None:
             print("[INFO] 빈 공간 클릭으로 차량 선택 해제됨")
             self.selected_id = None
@@ -230,6 +133,7 @@ class MultiTracker:
             if track.id == self.selected_id:
                 return track.get_bbox()
         return None
+
 
 
 class Track:
@@ -245,10 +149,7 @@ class Track:
         self.bbox = bbox
 
     def _init_kalman_filter(self, bbox):
-        """✅ 개선된 Kalman Filter 초기화"""
         kf = KalmanFilter(dim_x=7, dim_z=4)
-        
-        # 상태 전이 행렬 (등속 운동 모델)
         kf.F = np.array([
             [1, 0, 0, 0, 1, 0, 0],
             [0, 1, 0, 0, 0, 1, 0],
@@ -258,8 +159,6 @@ class Track:
             [0, 0, 0, 0, 0, 1, 0],
             [0, 0, 0, 0, 0, 0, 1]
         ])
-        
-        # 관측 행렬
         kf.H = np.array([
             [1, 0, 0, 0, 0, 0, 0],
             [0, 1, 0, 0, 0, 0, 0],
@@ -267,16 +166,13 @@ class Track:
             [0, 0, 0, 1, 0, 0, 0]
         ])
 
-        # ✅ 관측 노이즈: 위치는 정확, 크기는 불확실
-        kf.R = np.diag([1.0, 1.0, 10.0, 10.0])
-        
-        # ✅ 초기 공분산: 위치/속도는 중간 불확실성, 크기 변화는 작음
-        kf.P = np.diag([10., 10., 10., 10., 50., 50., 50.])
-        
-        # ✅ 프로세스 노이즈: 위치 변화는 크게, 크기 변화는 작게
-        kf.Q = np.diag([1.0, 1.0, 1.0, 1.0, 5.0, 5.0, 0.5])
+        kf.R = np.diag([0.1, 0.1, 2.0, 1.0])     # :contentReference[oaicite:4]{index=4} 의 튜닝 참고
+        # 초기 공분산: 속도항/크기항을 과도하게 크게 두지 않기
+        kf.P = np.diag([50., 50., 200., 100., 100., 100., 100.])
+        # 프로세스 노이즈: 약간 키워 초기에 빨리 따라붙게
+        kf.Q = np.diag([1.0, 1.0, 5.0, 2.0, 3.0, 3.0, 2.0])
 
-        # 초기 상태 설정
+        # === 초기 상태 설정 ===
         cx = (bbox[0] + bbox[2]) / 2
         cy = (bbox[1] + bbox[3]) / 2
         w = max(1e-6, bbox[2] - bbox[0])
@@ -284,25 +180,21 @@ class Track:
         s = w * h
         r = w / h
         kf.x[:4] = np.array([[cx], [cy], [s], [r]])
-        
         return kf
 
+
+
     def predict(self):
-        """예측 단계"""
         self.kf.predict()
         self.age += 1
         self.time_since_update += 1
         return self.kf.x[:4].flatten()
 
     def update(self, bbox):
-        """업데이트 단계"""
         cx = (bbox[0] + bbox[2]) / 2
         cy = (bbox[1] + bbox[3]) / 2
-        w = max(1e-6, bbox[2] - bbox[0])
-        h = max(1e-6, bbox[3] - bbox[1])
-        s = w * h
-        r = w / h
-        
+        s = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+        r = (bbox[2] - bbox[0]) / (bbox[3] - bbox[1])
         self.kf.update(np.array([cx, cy, s, r]))
         self.time_since_update = 0
         self.hits += 1
@@ -310,9 +202,8 @@ class Track:
         self.bbox = bbox
 
     def get_bbox(self):
-        """현재 bbox 반환"""
         cx, cy, s, r = self.kf.x[:4].flatten()
-        val = max(0.0, s * r)
+        val = max(0.0, s * r)        # ✅ 음수 방지
         w = max(1e-6, np.sqrt(val))
         h = max(1e-6, s / w if w > 1e-12 else 1e-6)
         x1 = int(cx - w / 2)
@@ -321,14 +212,13 @@ class Track:
         y2 = int(cy + h / 2)
         return (x1, y1, x2, y2)
 
+
     def contains_point(self, x, y):
-        """점이 bbox 내부에 있는지 확인"""
         x1, y1, x2, y2 = self.get_bbox()
         return x1 <= x <= x2 and y1 <= y <= y2
 
 
 def check_boundary_event(bbox, frame_width, frame_height, margin=0.05):
-    """경계 이벤트 체크"""
     x1, y1, x2, y2 = bbox
     cx = (x1 + x2) / 2
     cy = (y1 + y2) / 2

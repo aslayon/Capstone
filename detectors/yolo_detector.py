@@ -39,8 +39,8 @@ else:
     ROI = (200, 120, 700, 430)  # 기본값
 # ============================
 
-def get_vehicle_detections(frame, conf_threshold=0.5, vehicle_classes=['car'],
-                           roi=None, ignore_roi=False):
+def get_vehicle_detections(frame, conf_threshold=0.5, vehicle_classes=('car','truck','bus'), roi=None, ignore_roi=False):
+    vehicle_classes = list(vehicle_classes) if vehicle_classes is not None else ['car','truck','bus']
     """
     frame : 입력 프레임 (numpy array)
     roi   : 
