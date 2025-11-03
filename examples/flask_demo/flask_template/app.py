@@ -272,83 +272,68 @@ def cctv_page(slot: str):
     return render_template("stream.html", camera=camera_info)
 
 
+
+
 @app.route("/cctv/<slot>/video_feed")
 @login_required
 def video_feed(slot: str):
-    # 하드코딩된 카메라 정보
-    hardcoded_cameras = {
-        "SEOUL-A1": {
-            "name": "[경인선] 도당육교",
-            "url": "http://cctvsec.ktict.co.kr/3779/m515e2X6p0WWn5eCy3JdPpg8PEyua7utxPZSGVU0ebssHy4dZgIJ/BE8PkGyQZ541MLh0V9xwCcHkEnpLrZjFT2j9W6nia771YuyhbtQ54g=",
-        },
-        "SEOUL-A2": {
-            "name": "[경인선] 서운분기점2",
-            "url": "http://cctvsec.ktict.co.kr/3778/60oZ9iE4yQ7OpeJw7YnfibKQbG0lSsc1tRkqlcKS2mE6lXelBWNmLDt50JY9VmCr5y23oW1RWH28OHw4w/dvByXBB21iV0AiaR64DrfVvEk=",
-        },
-        "SEOUL-B1": {
-            "name": "[경인선] 부천",
-            "url": "http://cctvsec.ktict.co.kr/61/q/OLlanp9NAO6hMa3Le+8Pb1+xd2iRahcLyfvtwc5fbR/yfJgOIO4XHfu7iUwO+dF/pW/oPYDlHhwreKRtlho9pbft01T7Rdc8sDwAFZYLk=",
-        },
-        "SEOUL-B2": {
-            "name": "[인천국제공항선] 공항 30.1K",
-            "url": "http://cctvsec.ktict.co.kr/5721/aL2+zEJGmtl2TfQ7JlhZPhc68oM2nLHcCE6fjTNavuED31jffHeEclQZafC8YbrdBxFIGtGKgyXVP9QpBfCBNoCslnSyVJ8XLeQG9nIRArc=",
-        },
-        "SEOUL-C1": {
-            "name": "[인천국제공항선] 김포나들목",
-            "url": "http://cctvsec.ktict.co.kr/5029/G9deWuLXJL95+p0IgDHCTcg2eai6hgNK6dyX0doAbsYmGcDALvoOkNylCP/hhzXvz9e2YTLyG6YWw6hB5lCEgQ8eER7d4sia5zobjd4a6Sw=",
-        },
-        "SEOUL-C2": {"name": "웹캠 테스트", "url": "0"},
-        "SEOUL-D1": {"name": "미사용", "url": "0"},
-        "SEOUL-D2": {"name": "미사용", "url": "0"},
-        "GYEONGGI-A1": {
-            "name": "[경인선] 도당육교",
-            "url": "http://cctvsec.ktict.co.kr/3779/m515e2X6p0WWn5eCy3JdPpg8PEyua7utxPZSGVU0ebssHy4dZgIJ/BE8PkGyQZ541MLh0V9xwCcHkEnpLrZjFT2j9W6nia771YuyhbtQ54g=",
-        },
-        "GYEONGGI-A2": {
-            "name": "[경인선] 서운분기점2",
-            "url": "http://cctvsec.ktict.co.kr/3778/60oZ9iE4yQ7OpeJw7YnfibKQbG0lSsc1tRkqlcKS2mE6lXelBWNmLDt50JY9VmCr5y23oW1RWH28OHw4w/dvByXBB21iV0AiaR64DrfVvEk=",
-        },
-        "GYEONGGI-B1": {
-            "name": "[경인선] 부천",
-            "url": "http://cctvsec.ktict.co.kr/61/q/OLlanp9NAO6hMa3Le+8Pb1+xd2iRahcLyfvtwc5fbR/yfJgOIO4XHfu7iUwO+dF/pW/oPYDlHhwreKRtlho9pbft01T7Rdc8sDwAFZYLk=",
-        },
-        "GYEONGGI-B2": {
-            "name": "[인천국제공항선] 공항 30.1K",
-            "url": "http://cctvsec.ktict.co.kr/5721/aL2+zEJGmtl2TfQ7JlhZPhc68oM2nLHcCE6fjTNavuED31jffHeEclQZafC8YbrdBxFIGtGKgyXVP9QpBfCBNoCslnSyVJ8XLeQG9nIRArc=",
-        },
-        "GYEONGGI-C1": {
-            "name": "[인천국제공항선] 김포나들목",
-            "url": "http://cctvsec.ktict.co.kr/5029/G9deWuLXJL95+p0IgDHCTcg2eai6hgNK6dyX0doAbsYmGcDALvoOkNylCP/hhzXvz9e2YTLyG6YWw6hB5lCEgQ8eER7d4sia5zobjd4a6Sw=",
-        },
-        "GYEONGGI-C2": {"name": "웹캠 테스트", "url": "0"},
-        "GYEONGGI-D1": {"name": "미사용", "url": "0"},
-        "GYEONGGI-D2": {"name": "미사용", "url": "0"},
-    }
-
-    if slot not in hardcoded_cameras:
-        return "Camera not found", 404
-
-    source = hardcoded_cameras[slot]["url"]
-    # 로컬 웹캠 테스트용 (0번 웹캠)
-    if source == "0" or "example.com" in source:
-        source = 0
-
-    cap = cv2.VideoCapture(source)
-    if not cap.isOpened():
-        return "Cannot open video source", 500
-
-    def gen():
+    """
+    실시간 비디오 스트리밍 (MJPEG)
+    ✅ BUS에서 프레임만 가져옴 (cv2.VideoCapture 사용 안 함)
+    """
+    from core.frame_bus import BUS
+    import cv2
+    import time
+    
+    print(f"[VIDEO_FEED] 🎥 스트림 시작: slot={slot}")
+    
+    def generate():
+        frame_count = 0
+        no_frame_count = 0
+        
         while True:
-            frame = BUS.latest()
-            if frame is None:
-                time.sleep(0.03)
-                continue
-            ok, jpg = cv2.imencode(".jpg", frame)
-            if not ok:
-                continue
-            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" +
-                   jpg.tobytes() + b"\r\n")
-    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+            try:
+                # BUS에서 최신 프레임 가져오기
+                frame = BUS.latest()
+                
+                if frame is None:
+                    no_frame_count += 1
+                    if no_frame_count % 30 == 1:
+                        print(f"[VIDEO_FEED] ⚠️  프레임 없음 ({no_frame_count}회)")
+                    time.sleep(0.033)
+                    continue
+                
+                # 프레임 복구 로그
+                if no_frame_count > 0:
+                    print(f"[VIDEO_FEED] ✅ 복구! (누락: {no_frame_count})")
+                    no_frame_count = 0
+                
+                # JPEG 인코딩
+                ok, jpg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if not ok:
+                    continue
+                
+                frame_count += 1
+                if frame_count % 100 == 0:
+                    print(f"[VIDEO_FEED] 📊 {frame_count}프레임 전송 완료")
+                
+                # MJPEG 형식으로 전송
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + 
+                       jpg.tobytes() + 
+                       b'\r\n')
+                
+            except GeneratorExit:
+                print(f"[VIDEO_FEED] 🔌 연결 종료")
+                break
+            except Exception as e:
+                print(f"[VIDEO_FEED] ❌ 에러: {e}")
+                time.sleep(0.1)
+    
+    return Response(
+        generate(),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
 
 
 # ---------- 라우트: 로그 조회 ----------
@@ -476,3 +461,109 @@ def run():
             db.session.commit()
     start_pipeline_background()
     app.run(debug=False, threaded=True)
+
+
+
+import queue
+command_queue = queue.Queue()  # 웹 → pipeline 명령 전달
+
+tracking_stats = {
+    "mode": "single",
+    "selected_id": None,
+    "total_tracks": 0,
+    "fps": 0.0,
+    "last_update": time.time(),
+}
+
+
+# ===== API: 키 입력 전송 =====
+@app.route("/api/send_key", methods=["POST"])
+@login_required
+def api_send_key():
+    """
+    웹에서 키 입력을 pipeline으로 전달
+    
+    Body: {"key": "p"}
+    """
+    data = request.get_json() or {}
+    key = data.get("key", "").lower()
+    
+    if not key:
+        return jsonify({"status": "error", "message": "키 없음"}), 400
+    
+    # 명령 큐에 추가
+    command_queue.put({"type": "key", "key": key})
+    
+    print(f"[API] 키 입력: {key}")
+    
+    messages = {
+        "p": "Tri 모드 토글",
+        "a": "왼쪽 카메라로 이동",
+        "d": "오른쪽 카메라로 이동",
+        "w": "위쪽 카메라로 이동",
+        "s": "아래쪽 카메라로 이동",
+    }
+    
+    return jsonify({
+        "status": "ok",
+        "message": messages.get(key, f"키 '{key}' 전송 완료")
+    })
+
+
+# ===== API: 클릭 좌표 전송 =====
+@app.route("/api/click", methods=["POST"])
+@login_required
+def api_click():
+    """
+    웹에서 클릭 좌표를 pipeline으로 전달
+    
+    Body: {"x": 320, "y": 240}
+    """
+    data = request.get_json() or {}
+    x = data.get("x", 0)
+    y = data.get("y", 0)
+    
+    # 명령 큐에 추가
+    command_queue.put({"type": "click", "x": x, "y": y})
+    
+    print(f"[API] 클릭: ({x}, {y})")
+    
+    return jsonify({
+        "status": "ok",
+        "selected_id": tracking_stats.get("selected_id")
+    })
+
+
+# ===== API: 선택 해제 =====
+@app.route("/api/clear_selection", methods=["POST"])
+@login_required
+def api_clear_selection():
+    """선택 해제"""
+    command_queue.put({"type": "clear_selection"})
+    
+    print(f"[API] 선택 해제")
+    
+    return jsonify({
+        "status": "ok",
+        "message": "선택 해제됨"
+    })
+
+
+# ===== API: 통계 조회 =====
+@app.route("/api/stats")
+@login_required
+def api_stats():
+    """실시간 통계 반환"""
+    return jsonify(tracking_stats)
+
+
+# ===== API: 통계 업데이트 (pipeline에서 호출) =====
+def update_tracking_stats(stats_dict):
+    """
+    pipeline.py에서 호출하는 함수
+    
+    예: update_tracking_stats({"fps": 28.5, "total_tracks": 5})
+    """
+    global tracking_stats
+    tracking_stats.update(stats_dict)
+    tracking_stats["last_update"] = time.time()

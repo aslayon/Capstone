@@ -9,7 +9,7 @@ import numpy as np
 class YOLOTracker:
     def __init__(self, 
                  model_path="yolo11n.pt",
-                 conf_threshold=0.25,
+                 conf_threshold=0.2,
                  iou_threshold=0.7,
                  tracker_config="bytetrack.yaml",  # 또는 "botsort.yaml"
                  persist=True):

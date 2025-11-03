@@ -1,11 +1,328 @@
 {% extends "base.html" %}
+
 {% block content %}
+<style>
+    /* 컨트롤 패널 스타일 */
+    .video-wrapper {
+        position: relative;
+        display: inline-block;
+        max-width: 100%;
+    }
+    
+    #video {
+        max-width: 100%;
+        border: 1px solid #ccc;
+        display: block;
+        cursor: crosshair;
+    }
+    
+    .click-coords {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 5px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        display: none;
+        pointer-events: none;
+    }
+    
+    .controls-panel {
+        margin-top: 20px;
+        padding: 15px;
+        background: #f5f5f5;
+        border-radius: 8px;
+        border: 1px solid #ddd;
+    }
+    
+    .control-section {
+        margin-bottom: 15px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid #ddd;
+    }
+    
+    .control-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+    }
+    
+    .control-section h3 {
+        margin: 0 0 10px 0;
+        font-size: 16px;
+        color: #333;
+    }
+    
+    .btn {
+        padding: 8px 15px;
+        margin: 3px;
+        border: none;
+        border-radius: 4px;
+        background: #4CAF50;
+        color: white;
+        cursor: pointer;
+        font-size: 14px;
+        transition: background 0.2s;
+    }
+    
+    .btn:hover {
+        background: #45a049;
+    }
+    
+    .btn:active {
+        transform: scale(0.98);
+    }
+    
+    .btn.blue {
+        background: #2196F3;
+    }
+    
+    .btn.blue:hover {
+        background: #0b7dda;
+    }
+    
+    .btn.red {
+        background: #f44336;
+    }
+    
+    .btn.red:hover {
+        background: #da190b;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+        gap: 10px;
+        margin-top: 10px;
+    }
+    
+    .stat-box {
+        background: white;
+        padding: 10px;
+        border-radius: 4px;
+        text-align: center;
+        border: 1px solid #ddd;
+    }
+    
+    .stat-label {
+        font-size: 11px;
+        color: #666;
+        margin-bottom: 5px;
+    }
+    
+    .stat-value {
+        font-size: 20px;
+        font-weight: bold;
+        color: #4CAF50;
+    }
+    
+    .keyboard-hint {
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        color: #856404;
+        margin-top: 10px;
+    }
+    
+    .notification {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #4CAF50;
+        color: white;
+        padding: 12px 20px;
+        border-radius: 4px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        display: none;
+        z-index: 1000;
+        animation: slideIn 0.3s ease-out;
+    }
+    
+    @keyframes slideIn {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+</style>
+
 <h2>{{ camera.name }} - 실시간 스트림</h2>
-<div style="position:relative; display:inline-block;">
-	<img id="video" src="{{ url_for('video_feed', slot=camera.slot) }}" style="max-width:100%; border:1px solid #ccc; display:block;">
+
+<div class="video-wrapper">
+    <img id="video" src="{{ url_for('video_feed', slot=camera.slot) }}" alt="CCTV Stream">
+    <div class="click-coords" id="coords"></div>
 </div>
-<div style="margin-top:8px;">
-	<a href="{{ url_for('logs') }}">탐지 로그 보기</a>
-	<a href="{{ url_for('cctv_select') }}">카메라 목록으로 돌아가기</a>
+
+<!-- 컨트롤 패널 -->
+<div class="controls-panel">
+    <!-- 카메라 전환 -->
+    <div class="control-section">
+        <h3>🎥 카메라 전환</h3>
+        <button class="btn blue" onclick="sendKey('w')" title="위쪽 카메라">↑ 위 (W)</button>
+        <button class="btn blue" onclick="sendKey('a')" title="왼쪽 카메라">← 좌 (A)</button>
+        <button class="btn blue" onclick="sendKey('s')" title="아래쪽 카메라">↓ 아래 (S)</button>
+        <button class="btn blue" onclick="sendKey('d')" title="오른쪽 카메라">→ 우 (D)</button>
+    </div>
+    
+    <!-- 추적 모드 -->
+    <div class="control-section">
+        <h3>🎯 추적 제어</h3>
+        <button class="btn" onclick="sendKey('p')" title="Tri 모드 전환">📹 Tri 모드 (P)</button>
+        <button class="btn red" onclick="clearSelection()" title="차량 선택 해제">✖ 선택 해제</button>
+        <div class="keyboard-hint">
+            💡 <strong>팁:</strong> 영상을 클릭하면 차량을 선택/해제할 수 있습니다.
+        </div>
+    </div>
+    
+    <!-- 실시간 통계 -->
+    <div class="control-section">
+        <h3>📊 실시간 통계</h3>
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="stat-label">FPS</div>
+                <div class="stat-value" id="fps">-</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">추적 중</div>
+                <div class="stat-value" id="tracks">-</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">모드</div>
+                <div class="stat-value" id="mode" style="font-size: 14px;">-</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">선택 ID</div>
+                <div class="stat-value" id="selected" style="font-size: 14px;">-</div>
+            </div>
+        </div>
+    </div>
 </div>
+
+<div style="margin-top: 15px;">
+    <a href="{{ url_for('logs') }}">📋 탐지 로그 보기</a> | 
+    <a href="{{ url_for('cctv_select') }}">📹 카메라 목록으로 돌아가기</a>
+</div>
+
+<!-- 알림 -->
+<div id="notification" class="notification"></div>
+
+<script>
+// ===== 키 입력 전송 =====
+function sendKey(key) {
+    fetch('/api/send_key', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({key: key})
+    })
+    .then(r => r.json())
+    .then(data => {
+        console.log('Key sent:', key, data);
+        if (data.message) {
+            showNotification(data.message);
+        }
+    })
+    .catch(err => {
+        console.error('키 전송 실패:', err);
+        showNotification('❌ 키 전송 실패', true);
+    });
+}
+
+// ===== 선택 해제 =====
+function clearSelection() {
+    fetch('/api/clear_selection', {method: 'POST'})
+    .then(r => r.json())
+    .then(data => {
+        showNotification(data.message);
+        updateStats(); // 즉시 통계 업데이트
+    })
+    .catch(err => {
+        console.error('선택 해제 실패:', err);
+    });
+}
+
+// ===== 클릭 처리 =====
+document.getElementById('video').addEventListener('click', function(e) {
+    const rect = this.getBoundingClientRect();
+    const x = Math.floor(e.clientX - rect.left);
+    const y = Math.floor(e.clientY - rect.top);
+    
+    // 좌표 표시
+    const coords = document.getElementById('coords');
+    coords.textContent = `(${x}, ${y})`;
+    coords.style.display = 'block';
+    setTimeout(() => coords.style.display = 'none', 2000);
+    
+    // 서버로 클릭 전송
+    fetch('/api/click', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({x: x, y: y})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.selected_id) {
+            showNotification(`🎯 차량 ID ${data.selected_id} 선택됨`);
+        } else {
+            showNotification('✖ 선택 해제됨');
+        }
+        updateStats(); // 즉시 통계 업데이트
+    })
+    .catch(err => {
+        console.error('클릭 처리 실패:', err);
+    });
+});
+
+// ===== 키보드 이벤트 =====
+document.addEventListener('keydown', function(e) {
+    const key = e.key.toLowerCase();
+    if (['p', 'a', 's', 'd', 'w'].includes(key)) {
+        e.preventDefault();
+        sendKey(key);
+    }
+});
+
+// ===== 통계 업데이트 =====
+function updateStats() {
+    fetch('/api/stats')
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('fps').textContent = data.fps ? data.fps.toFixed(1) : '-';
+        document.getElementById('tracks').textContent = data.total_tracks || '0';
+        document.getElementById('mode').textContent = data.mode === 'tri' ? 'Tri' : 'Single';
+        document.getElementById('selected').textContent = data.selected_id || '-';
+    })
+    .catch(err => {
+        console.error('통계 가져오기 실패:', err);
+    });
+}
+
+// 3초마다 통계 업데이트
+setInterval(updateStats, 3000);
+updateStats(); // 즉시 1회 실행
+
+// ===== 알림 표시 =====
+function showNotification(msg, isError = false) {
+    const notification = document.getElementById('notification');
+    notification.textContent = msg;
+    notification.style.background = isError ? '#f44336' : '#4CAF50';
+    notification.style.display = 'block';
+    
+    setTimeout(() => {
+        notification.style.display = 'none';
+    }, 3000);
+}
+
+// ===== 초기 메시지 =====
+console.log('🎮 CCTV 컨트롤 활성화');
+console.log('키보드: P(Tri 모드), A/W/S/D(카메라 이동)');
+console.log('마우스: 클릭으로 차량 선택');
+</script>
+
 {% endblock %}

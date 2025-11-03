@@ -30,9 +30,9 @@ def get_neighbors(graph, current_name: str):
         if node["cctvname"] == current_name:
             found = True
             for c in node["connections"]:
-                if c["direction"] == "north":
+                if c["direction"] == "south":
                     left = c["target"]   # ✅ 수정: north → left
-                elif c["direction"] == "south":
+                elif c["direction"] == "north":
                     right = c["target"]  # ✅ 수정: south → right
             break
     

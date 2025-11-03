@@ -174,10 +174,6 @@ def run_detect():
     # ✅ 연속 매칭 검증기 초기화
     match_validator = ConsecutiveMatchValidator(required_count=3)  # 우측
     
-    # ✅ 키 입력 디바운싱을 위한 변수
-    last_key_time = {}  # 각 키별 마지막 입력 시간
-    KEY_DEBOUNCE_TIME = 0.3  # 300ms 디바운스 시간
-    
     HISTORY_CLEANUP_EVERY = 100  # 100프레임마다 정리
     
     tri_win = "Tri-Prepare (L/C/R -> 2160x480)"
@@ -391,28 +387,18 @@ def run_detect():
         
         k = cv2.waitKey(1) & 0xFF
         
-        # ✅ 키 입력 디바운싱: 같은 키가 300ms 이내에 다시 눌리면 무시
-        current_time = time.time()
-        if k != 255:  # 키가 눌렸을 때만
-            last_time = last_key_time.get(k, 0)
-            if current_time - last_time < KEY_DEBOUNCE_TIME:
-                # 디바운스 시간 내의 중복 입력 무시
-                k = 255  # 무시 처리
-            else:
-                # 새로운 키 입력으로 기록
-                last_key_time[k] = current_time
         
         if k in (27, ord('q')):
             break
         elif k == ord('p'):
             tri_prepare = not tri_prepare
             switcher.tri_mode = tri_prepare
-            print(f"[DEBUG] tri-prepare: {tri_prepare} (시간: {time.strftime('%H:%M:%S')})")
+            print("[DEBUG] tri-prepare:", tri_prepare)  # 디버그
             if tri_prepare:
                 switcher.ensure_neighbor_managers()
             # 다음 프레임에서 창 크기 재조정
             need_resize = True
-        elif k != 255:  # 다른 유효한 키 입력
+        else:
             switcher.on_key(k)
             crop_saver.new_camera(switcher.current_name, reset_counts=True)
         # tri-prepare 확장 (추후 3캠 concat_three, ROI shift 활용)
