@@ -1,11 +1,11 @@
 # app.py
 
+# 고삼터널-포천
+from examples.flask_demo.flask_template.app import run, pipeline_state
 
-#고삼터널-포천
-from examples.flask_demo.flask_template.app import run
+__all__ = ["run", "pipeline_state"]
 
-
-if __name__ == "__main__": 
+if __name__ == "__main__":
     run()
 
 

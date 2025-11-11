@@ -1,0 +1,35 @@
+body { font-family: system-ui, sans-serif; margin:0; }
+.container { max-width: 960px; margin: 0 auto; padding: 1rem; }
+.nav { background:#222; color:#fff; }
+.nav a { color:#fff; margin-right:1rem; text-decoration:none; }
+.nav .spacer { flex:1; }
+.nav .container { display:flex; align-items:center; }
+.flash { list-style:none; padding:0; }
+.flash li { padding:.5rem; margin:.25rem 0; border-radius:4px; }
+.flash-success { background:#e6ffed; }
+.flash-danger { background:#ffecec; }
+.flash-warning { background:#fff7db; }
+.flash-info { background:#eaf4ff; }
+.grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap:1rem; }
+.card { display:block; padding:1rem; border:1px solid #ddd; border-radius:8px; text-decoration:none; color:inherit; }
+
+/* 4-column grid for camera placeholders */
+.grid-4 { display:grid; grid-template-columns: repeat(4, 1fr); gap:1rem; }
+.placeholder-card { display:flex; align-items:center; justify-content:center; height:110px; border:1px dashed #ccc; background: #fafafa; border-radius:8px; }
+.placeholder-card .meta { text-align:center; }
+
+/* modifier: use solid border for registered regions */
+.region-solid .placeholder-card { border-style: solid; border:1px solid #ccc; background: #fff; }
+.table { width:100%; border-collapse: collapse; margin-top:1rem; }
+.table th, .table td { border:1px solid #ddd; padding:.5rem; }
+
+/* centered auth card */
+.auth-container { display:flex; align-items:center; justify-content:center; min-height:60vh; }
+.auth-card { width: 360px; background: #fff; border: 1px solid #e6e6e6; padding: 1.5rem; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
+.auth-card h1 { margin:0 0 1rem 0; font-size:1.25rem; text-align:center; }
+.auth-card form { display:flex; flex-direction:column; gap:.5rem; }
+.auth-card label { font-size:.9rem; }
+.auth-card input { padding:.6rem .5rem; border:1px solid #ccc; border-radius:4px; }
+.auth-card button { margin-top:.5rem; padding:.6rem; background:#0b5fff; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+.auth-card .muted { text-align:center; margin-top:.75rem; font-size:.9rem; color:#444; }
+.auth-card a.link { color:#0b5fff; text-decoration:none; font-weight:600; }
