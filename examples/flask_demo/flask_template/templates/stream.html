@@ -368,13 +368,13 @@ document.getElementById('video').addEventListener('click', function(e) {
         if (data.selected_id) {
             showNotification(`🎯 차량 ID ${data.selected_id} 선택됨`);
         } else {
-            showNotification('❌ 선택 해제됨');
+            //showNotification('❌ 선택 해제됨');
         }
         updateStats();
     })
     .catch(err => {
         console.error('❌ 클릭 처리 실패:', err);
-        showNotification('⚠️ 클릭 처리 실패', true);
+        //showNotification('⚠️ 클릭 처리 실패', true);
     });
 });
 

@@ -27,7 +27,9 @@ class YOLOTracker:
         self.tracker = tracker_config
         self.persist = persist
         self.selected_id = None
-        
+        self.selection_anchor_id = None  # 최초 클릭한 ID 유지용
+        self.last_track_confidences = {}  # 최근 track() 호출에서의 confidence
+
         # 차량 클래스 (COCO dataset)
         self.vehicle_classes = [2, 3, 5, 7]  # car, motorcycle, bus, truck
         
@@ -54,6 +56,7 @@ class YOLOTracker:
         )
         
         tracks = []
+        track_confidences = {}
         if results and len(results) > 0:
             result = results[0]
             
@@ -61,10 +64,14 @@ class YOLOTracker:
             if result.boxes.id is not None:
                 boxes = result.boxes.xyxy.cpu().numpy()
                 track_ids = result.boxes.id.cpu().numpy().astype(int)
+                confidences = None
+                if getattr(result.boxes, "conf", None) is not None:
+                    confidences = result.boxes.conf.cpu().numpy()
                 
                 for i in range(len(boxes)):
                     x1, y1, x2, y2 = map(int, boxes[i])
                     track_id = track_ids[i]
+                    conf = float(confidences[i]) if confidences is not None else None
                     
                     # ROI 필터링
                     if roi is not None:
@@ -75,6 +82,10 @@ class YOLOTracker:
                             continue
                     
                     tracks.append((track_id, x1, y1, x2, y2))
+                    if conf is not None:
+                        track_confidences[track_id] = conf
+
+        self.last_track_confidences = track_confidences
         
         return tracks
     
@@ -131,6 +142,8 @@ class YOLOTracker:
         self.model.predictor.trackers = []
         self.persist = True
         self.selected_id = None
+        self.selection_anchor_id = None
+        self.last_track_confidences = {}
         print("[INFO] 트래커 리셋")
 
 

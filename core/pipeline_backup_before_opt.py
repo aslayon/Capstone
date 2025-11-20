@@ -47,22 +47,6 @@ from core.pipeline_components.selection import SelectionHandler
 
 def _sanitize(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]+', '_', str(name)).strip()
-
-
-def _confidence_to_red(conf):
-    """
-    Normalize tracker confidence (0~1) to a red intensity for the selected box.
-    """
-    if conf is None:
-        return (0, 0, 200)
-    try:
-        value = float(conf)
-    except (TypeError, ValueError):
-        value = 0.0
-    value = max(0.0, min(value, 1.0))
-    base = 120  # 최소 밝기
-    red = int(base + value * (255 - base))
-    return (0, 0, min(red, 255))
  
 
 
@@ -71,7 +55,7 @@ def _confidence_to_red(conf):
 
 # 동일 카메라(= 같은 화면/세그먼트)일 때 / 다른 카메라일 때
 REID_THRESH_SAME  = 0.55   # 동일 카메라: 여유 있게
-REID_THRESH_OTHER = 0.8 #80   # 다른 카메라: 로그 분석 기반 최적값
+REID_THRESH_OTHER = 0.78 #80   # 다른 카메라: 로그 분석 기반 최적값
 
 
 WIN = "Capstone - CCTV Tracking"
@@ -87,7 +71,7 @@ tracker = None
 tracks = []
 tracks_L, tracks_C, tracks_R = [], [], []
 
-#409 459 501
+
 
 def install_tri_selector(win_name, get_scale, get_seg_w, get_disp_img,
                          get_tracks_L, get_tracks_C, get_tracks_R):
@@ -355,12 +339,10 @@ def run_detect():
                 cv2.putText(frame, f"{conf:.2f}", (int(x1), int(y1)-5),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (140, 140, 140), 1)
 
-            # Tracking 박스 (초록/신뢰도 기반 붉은색)
-            conf_map = getattr(tracker, "last_track_confidences", {}) or {}
+            # Tracking 박스 (초록/빨강)
             for tid, x1, y1, x2, y2 in tracks:
-                is_selected = (tracker.selected_id is not None and tid == tracker.selected_id)
-                color = _confidence_to_red(conf_map.get(tid)) if is_selected else (0,255,0)
-                if is_selected:
+                color = (0,0,255) if (tracker.selected_id is not None and tid == tracker.selected_id) else (0,255,0)
+                if tid == tracker.selected_id:
                     if frame_idx % collect_every == 0:
                         # 센터 원본 frame 기준으로 수집
                         if selected_bank.size() < 5:
@@ -598,18 +580,11 @@ def run_detect():
                         X1, X2 = int(x1 + xoff), int(x2 + xoff)
                         cv2.rectangle(img, (X1, int(y1)), (X2, int(y2)), color, 1)
 
-                def draw_tracks_on_tri(img, tracks, xoff, selected_id=None, remap=None, confidence_map=None):
+                def draw_tracks_on_tri(img, tracks, xoff, selected_id=None, remap=None):
                     for tid, x1, y1, x2, y2 in tracks:
                         shown_id = remap.get(tid, tid) if remap else tid
-                        is_sel = (
-                            selected_id is not None
-                            and (shown_id == selected_id or tid == selected_id)
-                        )
-                        if is_sel:
-                            conf = confidence_map.get(tid) if confidence_map else None
-                            color = _confidence_to_red(conf)
-                        else:
-                            color = (0,255,0)
+                        is_sel = (selected_id is not None and shown_id == selected_id)
+                        color = (0,0,255) if is_sel else (0,255,0)
                         X1, X2 = int(x1 + xoff), int(x2 + xoff)
                         cv2.rectangle(img, (X1, int(y1)), (X2, int(y2)), color, 2)
                         cv2.putText(img, f"ID {shown_id}", (X1, int(y1)-10),
@@ -732,9 +707,7 @@ def run_detect():
                                                         for i,d in enumerate(per_band)])
                                     lines.append(f"{now_txt}  seg={seg_name}  tid={tid}  d_mean={d_mean:.4f}  {band_str}")
                             if lines:
-                                anchor_id = getattr(tracker, "selection_anchor_id", None) or tracker.selected_id
-                                if anchor_id is not None:
-                                    log_bhatta5(switcher.current_name, anchor_id, lines)
+                                log_bhatta5(switcher.current_name, tracker.selected_id, lines)
 
 
                 #
@@ -747,30 +720,9 @@ def run_detect():
                 draw_dets_on_tri(tri, dets_R, seg_w*2)'''
 
                 # (b) 추적 박스 (선택ID는 빨강)
-                draw_tracks_on_tri(
-                    tri,
-                    tracks_L,
-                    0,
-                    selected_id=tracker.selected_id,
-                    remap=remap_left,
-                    confidence_map=getattr(tracker_L, "last_track_confidences", None),
-                )
-                draw_tracks_on_tri(
-                    tri,
-                    tracks_C,
-                    seg_w,
-                    selected_id=tracker.selected_id,
-                    remap=remap_center,
-                    confidence_map=getattr(tracker, "last_track_confidences", None),
-                )
-                draw_tracks_on_tri(
-                    tri,
-                    tracks_R,
-                    seg_w * 2,
-                    selected_id=tracker.selected_id,
-                    remap=remap_right,
-                    confidence_map=getattr(tracker_R, "last_track_confidences", None),
-                )
+                draw_tracks_on_tri(tri, tracks_L, 0,       selected_id=tracker.selected_id, remap=remap_left)
+                draw_tracks_on_tri(tri, tracks_C, seg_w,   selected_id=tracker.selected_id, remap=remap_center)
+                draw_tracks_on_tri(tri, tracks_R, seg_w*2, selected_id=tracker.selected_id, remap=remap_right)
 
                 #print(lf_s.shape, cf_s.shape, rf_s.shape)
 

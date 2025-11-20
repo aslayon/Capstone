@@ -371,7 +371,7 @@ def load_cctv_data():
         print(f"JSON 파일 로드 실패: {e}")
         # 기본값 반환 - 모든 슬롯 포함!
         return {
-            "SEOUL-A1": {"name": "[경인선] 도당육교", "url": "0"},
+            "SEOUL-A1": {"name": "[세종포천선] [포천]고삼터널(포천)", "url": "0"},
             "SEOUL-A2": {"name": "[경인선] 서운분기점2", "url": "0"},
             "SEOUL-B1": {"name": "[경인선] 부천", "url": "0"},
             "SEOUL-B2": {"name": "[인천국제공항선] 공항 30.1K", "url": "0"},

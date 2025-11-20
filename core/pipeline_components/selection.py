@@ -150,13 +150,20 @@ class SelectionHandler:
             return
 
         self.tracker.selected_id = clicked_id
+        setattr(self.tracker, "selection_anchor_id", clicked_id)
         self.update_web_stats(selected_id=clicked_id)
         print(f"[INFO] 🎯 tri 모드 차량 선택됨: seg={clicked_seg}, ID={clicked_id}")
 
         history = self._history_for_segment(clicked_seg)
         cam_name = self._camera_name_for_segment(clicked_seg)
         self._log_selection(clicked_seg, cam_name, clicked_id)
-        self._collect_history_crops(history, clicked_seg, cam_name, clicked_id)
+        self._collect_history_crops(
+            history,
+            clicked_seg,
+            cam_name,
+            clicked_id,
+            reset_bank=True,
+        )
 
     # ------------------------------------------------------------------ #
     def _handle_single_click(self, x: int, y: int) -> None:
@@ -194,6 +201,7 @@ class SelectionHandler:
             return
 
         self.tracker.selected_id = clicked_id
+        setattr(self.tracker, "selection_anchor_id", clicked_id)
         if self.update_web_stats:
             self.update_web_stats(selected_id=clicked_id)
         print(
@@ -202,7 +210,11 @@ class SelectionHandler:
         )
         cam_name = getattr(self.switcher, "current_name", None)
         self._collect_history_crops(
-            self.track_history_center, "C", cam_name, clicked_id
+            self.track_history_center,
+            "C",
+            cam_name,
+            clicked_id,
+            reset_bank=True,
         )
 
     # ------------------------------------------------------------------ #
@@ -228,12 +240,17 @@ class SelectionHandler:
         segment: str,
         cam_name: Optional[str],
         track_id: Optional[int],
+        *,
+        reset_bank: bool = False,
     ) -> None:
         if history is None or track_id is None:
             return
 
         if not hasattr(history, "get_history"):
             return
+
+        if reset_bank and hasattr(self.selected_bank, "clear"):
+            self.selected_bank.clear()
 
         history_frames = history.get_history(track_id)
         target = getattr(
@@ -310,6 +327,7 @@ class SelectionHandler:
     def _clear_selection(self) -> None:
         self.selected_bank.clear()
         self.tracker.selected_id = None
+        setattr(self.tracker, "selection_anchor_id", None)
         if self.update_web_stats:
             self.update_web_stats(selected_id=None)
 

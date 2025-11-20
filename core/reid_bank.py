@@ -251,15 +251,30 @@ class ReIDBank:
     def _band_crops_equal(bgr, n=5, min_band_h=10):
         """세로로 n등분(기본 5밴드). 얇아지면 None 반환."""
         h, w = bgr.shape[:2]
-        band_h = h // n
-        if band_h < min_band_h:
+        if h <= 0 or w <= 0:
             return [None] * n
+
+        band_h = h // n
+        if band_h >= min_band_h:
+            bands = []
+            y = 0
+            for i in range(n):
+                y2 = h if i == n - 1 else (y + band_h)
+                bands.append(bgr[y:y2, :])
+                y = y2
+            return bands
+
         bands = []
-        y = 0
+        bounds = np.linspace(0, h, n + 1, dtype=int)
         for i in range(n):
-            y2 = h if i == n - 1 else (y + band_h)
-            bands.append(bgr[y:y2, :])
-            y = y2
+            y1 = int(bounds[i])
+            y2 = int(bounds[i + 1])
+            if y1 >= h:
+                bands.append(None)
+                continue
+            if y2 <= y1:
+                y2 = min(h, y1 + 1)
+            bands.append(bgr[y1:y2, :])
         return bands
 
     def add_from_frame_banded5(self, frame, box, pad=4, origin_seg=None, origin_cam=None, cam_id=None, use_whitening=True):
