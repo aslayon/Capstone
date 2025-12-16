@@ -299,11 +299,20 @@ def run_detect():
             print(f"[DEBUG] FPS: {fps:.2f}")
             
             # ✅ 웹에 통계 전송
+            active_cameras = []
+            if tri_prepare:
+                for cam_name in (switcher.left_name, switcher.current_name, switcher.right_name):
+                    if cam_name:
+                        active_cameras.append(cam_name)
+            elif switcher.current_name:
+                active_cameras.append(switcher.current_name)
             update_web_stats(
                 fps=fps,
                 total_tracks=len(tracks) if not tri_prepare else len(tracks_L) + len(tracks_C) + len(tracks_R),
                 selected_id=tracker.selected_id,
-                mode='tri' if tri_prepare else 'single'
+                mode='tri' if tri_prepare else 'single',
+                current_camera=switcher.current_name,
+                tri_cameras=active_cameras,
             )
             
             frame_count = 0

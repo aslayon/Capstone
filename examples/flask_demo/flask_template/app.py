@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 import time
 import json
+import re
 import click
 import cv2
 import numpy as np
@@ -37,6 +38,35 @@ from flask_login import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
+GRAPH_CONNECTIONS_CACHE: Optional[Dict[str, Any]] = None
+
+
+def load_graph_connections_cache() -> Dict[str, Any]:
+    """config/cctv_graph_connections.json을 로딩/캐싱"""
+    global GRAPH_CONNECTIONS_CACHE
+    if GRAPH_CONNECTIONS_CACHE is not None:
+        return GRAPH_CONNECTIONS_CACHE
+    try:
+        project_root = Path(__file__).resolve().parents[3]
+    except IndexError:
+        project_root = Path(__file__).resolve().parent
+    graph_path = project_root / "config" / "cctv_graph_connections.json"
+    try:
+        with open(graph_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"[GRAPH] 연결 그래프 로드 실패: {e}")
+        GRAPH_CONNECTIONS_CACHE = {}
+        return GRAPH_CONNECTIONS_CACHE
+    connections: Dict[str, Any] = {}
+    for entry in data:
+        name = entry.get("cctvname")
+        if not name:
+            continue
+        connections[name] = entry.get("connections", [])
+    GRAPH_CONNECTIONS_CACHE = connections
+    return GRAPH_CONNECTIONS_CACHE
+
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "dev-secret-key-change-me"
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///app.db"
@@ -60,17 +90,55 @@ class PipelineState:
         self.mode = 'single'  # 'single' or 'tri'
         self.current_camera = None
         self.lock = threading.Lock()
+        self.camera_route: list[str] = []
+        self.tri_active_cameras: list[str] = []
+        self.max_route_length = 20
+        self.graph_connections = load_graph_connections_cache()
+        self.route_start_camera: Optional[str] = None
         
         # 통계 자동 업데이트를 위한 변수
         self.frame_count = 0
         self.last_time = time.time()
-        
+
+    def _append_camera_route(self, camera_name: Optional[str]):
+        if not camera_name:
+            return
+        name = str(camera_name).strip()
+        if not name:
+            return
+        if self.camera_route and self.camera_route[-1] == name:
+            return
+        self.camera_route.append(name)
+        if len(self.camera_route) > self.max_route_length:
+            self.camera_route = self.camera_route[-self.max_route_length:]
+
+    def _update_tri_active(self, cameras: Optional[list]):
+        cleaned = [str(cam).strip() for cam in (cameras or []) if cam]
+        if not cleaned:
+            self.tri_active_cameras = []
+            return
+        self.tri_active_cameras = cleaned
+
     def update_stats(self, **kwargs):
         """통계 업데이트"""
         with self.lock:
+            tri_list = kwargs.pop('tri_cameras', None)
+            if tri_list is not None:
+                self._update_tri_active(tri_list)
+            prev_selected = self.selected_id
             for key, value in kwargs.items():
                 if hasattr(self, key):
                     setattr(self, key, value)
+                    if key == "current_camera":
+                        self._append_camera_route(value)
+            if 'selected_id' in kwargs:
+                new_selected = kwargs.get('selected_id')
+                if new_selected and new_selected != prev_selected:
+                    self.route_start_camera = self.current_camera
+                    self.camera_route = []
+                    self._append_camera_route(self.current_camera)
+                elif not new_selected:
+                    self.route_start_camera = None
     
     def get_stats(self):
         """현재 통계 반환 (JSON 직렬화 안전)"""
@@ -140,6 +208,21 @@ class PipelineState:
             self.last_time = now
         
         self.frame_count += 1
+    
+    def get_camera_route_summary(self) -> Dict[str, Any]:
+        with self.lock:
+            route_snapshot = list(self.camera_route)
+            start = self.route_start_camera or (route_snapshot[0] if route_snapshot else None)
+            current = route_snapshot[-1] if route_snapshot else None
+            neighbors = self.graph_connections.get(current, []) if current else []
+            tri_active = list(self.tri_active_cameras)
+        return {
+            'start_camera': start,
+            'current_camera': current,
+            'route': route_snapshot,
+            'neighbors': neighbors,
+            'tri_active_cameras': tri_active,
+        }
 
 # 전역 pipeline 상태
 pipeline_state = PipelineState()
@@ -153,6 +236,7 @@ class VehicleTrackingLogMonitor:
     def __init__(self, log_root="tracking_logs"):
         self.log_root = Path(log_root)
         self.last_positions = {}  # 파일별 마지막 읽은 위치
+        self.graph_connections = load_graph_connections_cache()
         
     def get_latest_logs(self, max_lines=100):
         """최신 로그 가져오기"""
@@ -235,14 +319,9 @@ class VehicleTrackingLogMonitor:
             
             # 차량 ID 추출
             vehicle_id = "-"
-            if "ID:" in message or "ID " in message:
-                try:
-                    for part in message.replace("ID:", "ID ").split():
-                        if part.startswith("ID"):
-                            vehicle_id = part.replace("ID", "").strip("():,")
-                            break
-                except:
-                    pass
+            id_match = re.search(r'ID\s*[:=]?\s*([A-Za-z0-9_-]+)', message)
+            if id_match:
+                vehicle_id = id_match.group(1)
             
             # 신뢰도 추출
             confidence = "-"
@@ -307,7 +386,75 @@ class VehicleTrackingLogMonitor:
         all_logs.sort(key=lambda x: x['timestamp'], reverse=True)
         return all_logs[:max_lines]
 
-# 전역 로그 모니터
+    def _extract_numeric_score(self, confidence_text):
+        if not confidence_text:
+            return None
+        match = re.search(r"(\d+\.\d+)", confidence_text)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+        return None
+
+    def _is_reliable_camera_update(self, log_entry):
+        event_type = (log_entry.get('event_type') or '').upper()
+        confidence = (log_entry.get('confidence') or '').upper()
+        if event_type in ('START', 'SWITCH'):
+            return True
+        if event_type == 'MATCH':
+            if any(level in confidence for level in ('HIGH', 'MEDIUM')):
+                return True
+            score = self._extract_numeric_score(confidence)
+            return score is not None and score >= 0.65
+        return False
+
+    def build_vehicle_states(self, logs):
+        """�α׷κ��� �� ������ ����/���� ī�޶� ����"""
+        if not logs:
+            return []
+        try:
+            sorted_logs = sorted(logs, key=lambda x: x.get('timestamp', ''))
+        except Exception:
+            sorted_logs = logs
+        states = {}
+        for log in sorted_logs:
+            vehicle_id = (log.get('vehicle_id') or '').strip()
+            camera = (log.get('camera') or '').strip()
+            if not vehicle_id or vehicle_id == '-' or not camera or camera == '�� �� ����':
+                continue
+            state = states.setdefault(vehicle_id, {
+                'start_camera': None,
+                'current_camera': None,
+                'last_event': None,
+                'last_timestamp': None,
+            })
+            if state['start_camera'] is None and log.get('event_type') == 'START':
+                state['start_camera'] = camera
+            if self._is_reliable_camera_update(log):
+                if state['start_camera'] is None:
+                    state['start_camera'] = camera
+                state['current_camera'] = camera
+                state['last_event'] = log.get('event_type')
+                state['last_timestamp'] = log.get('timestamp')
+        summaries = []
+        for vid, info in states.items():
+            current_camera = info.get('current_camera') or info.get('start_camera')
+            neighbors = self.graph_connections.get(current_camera, []) if current_camera else []
+            summaries.append({
+                'vehicle_id': vid,
+                'start_camera': info.get('start_camera'),
+                'current_camera': current_camera,
+                'last_event': info.get('last_event'),
+                'last_timestamp': info.get('last_timestamp'),
+                'neighbors': neighbors,
+            })
+        summaries.sort(key=lambda x: x.get('last_timestamp') or '', reverse=True)
+        return summaries
+
+    def get_vehicle_state_summary(self, max_lines=400):
+        logs = self.get_all_logs_from_file(max_lines=max_lines)
+        return self.build_vehicle_states(logs)
 log_monitor = VehicleTrackingLogMonitor()
 
 # ============================================================
@@ -574,8 +721,15 @@ def logs():
     """차량 추적 로그 페이지"""
     # 로그 파일에서 로그 가져오기
     vehicle_logs = log_monitor.get_all_logs_from_file(max_lines=200)
+    vehicle_states = log_monitor.build_vehicle_states(vehicle_logs)
+    camera_route = pipeline_state.get_camera_route_summary()
     
-    return render_template("logs.html", logs=vehicle_logs)
+    return render_template(
+        "logs.html",
+        logs=vehicle_logs,
+        vehicle_states=vehicle_states,
+        camera_route=camera_route,
+    )
 
 # ============================================================
 # API 엔드포인트 - 웹 ↔ Pipeline 통신
@@ -590,7 +744,13 @@ def api_stats():
 def api_logs():
     """실시간 로그 API"""
     logs = log_monitor.get_latest_logs(max_lines=50)
-    return jsonify({'logs': logs})
+    vehicle_states = log_monitor.get_vehicle_state_summary()
+    camera_route = pipeline_state.get_camera_route_summary()
+    return jsonify({
+        'logs': logs,
+        'vehicle_states': vehicle_states,
+        'camera_route': camera_route,
+    })
 
 
 @app.route('/api/send_key', methods=['POST'])
