@@ -1,0 +1,18 @@
+tracker_type: bytetrack
+
+# Confidence thresholds
+# Higher thresholds reduce spurious new tracks (ID jumps)
+track_high_thresh: 0.6
+track_low_thresh: 0.1
+new_track_thresh: 0.7
+
+# Association and buffer
+match_thresh: 0.85
+track_buffer: 30
+fuse_score: false
+
+# Filter tiny boxes (pixel area)
+min_box_area: 60
+
+# Dataset mode
+mot20: false

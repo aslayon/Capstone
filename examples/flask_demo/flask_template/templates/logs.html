@@ -1,0 +1,802 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    /* 로그 페이지 스타일 */
+    .logs-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+    
+    .logs-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 12px;
+        margin-bottom: 30px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    
+    .logs-header h2 {
+        margin: 0 0 10px 0;
+        font-size: 28px;
+    }
+    
+    .logs-header p {
+        margin: 0;
+        opacity: 0.9;
+    }
+    
+    /* 필터 섹션 */
+    .filters {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    
+    .filters label {
+        font-weight: 500;
+        color: #555;
+    }
+    
+    .filters select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        background: white;
+    }
+    
+    .filters button {
+        padding: 8px 20px;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: background 0.2s;
+    }
+    
+    .filters button:hover {
+        background: #764ba2;
+    }
+    
+    /* 로그 테이블 */
+    .logs-table-wrapper {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        overflow: hidden;
+    }
+    
+    .logs-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .logs-table thead {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+    
+    .logs-table th {
+        padding: 15px;
+        text-align: left;
+        font-weight: 600;
+        font-size: 14px;
+    }
+    
+    .logs-table tbody tr {
+        border-bottom: 1px solid #eee;
+        transition: background 0.2s;
+    }
+    
+    .logs-table tbody tr:hover {
+        background: #f8f9fa;
+    }
+    
+    .logs-table tbody tr:last-child {
+        border-bottom: none;
+    }
+    
+    .logs-table td {
+        padding: 12px 15px;
+        font-size: 13px;
+    }
+    
+    /* 이벤트 타입 뱃지 */
+    .event-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    
+    .event-badge.start {
+        background: #4CAF50;
+        color: white;
+    }
+    
+    .event-badge.match {
+        background: #2196F3;
+        color: white;
+    }
+    
+    .event-badge.switch {
+        background: #FF9800;
+        color: white;
+    }
+    
+    .event-badge.info {
+        background: #9E9E9E;
+        color: white;
+    }
+    
+    /* 차량 ID 강조 */
+    .vehicle-id {
+        font-weight: 600;
+        color: #667eea;
+        font-family: 'Courier New', monospace;
+    }
+    
+    /* 신뢰도 표시 */
+    .confidence {
+        font-weight: 500;
+        font-family: 'Courier New', monospace;
+    }
+    
+    .confidence.high {
+        color: #4CAF50;
+    }
+    
+    .confidence.medium {
+        color: #FF9800;
+    }
+    
+    .confidence.low {
+        color: #f44336;
+    }
+    
+    /* 로그 메시지 */
+    .log-message {
+        color: #555;
+        line-height: 1.4;
+    }
+    
+    /* 빈 상태 */
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: #999;
+    }
+    
+    .empty-state i {
+        font-size: 48px;
+        margin-bottom: 15px;
+        display: block;
+    }
+    
+    /* 자동 새로고침 표시 */
+    .auto-refresh {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        background: #f1f5f9;
+        border-radius: 10px;
+        font-size: 13px;
+        color: #334155;
+        flex-wrap: wrap;
+    }
+    
+    .refresh-indicator {
+        width: 10px;
+        height: 10px;
+        background: #cbd5f5;
+        border-radius: 50%;
+        transition: all 0.2s;
+    }
+    
+    .refresh-indicator.active {
+        background: #4CAF50;
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.3;
+        }
+    }
+    
+    .toggle-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 500;
+    }
+    
+    .refresh-btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 6px;
+        background: #667eea;
+        color: white;
+        cursor: pointer;
+        font-weight: 600;
+        transition: background 0.2s;
+    }
+    
+    .refresh-btn:hover {
+        background: #5563d6;
+    }
+    
+    /* 네비게이션 */
+    .nav-links {
+        margin-top: 20px;
+        text-align: center;
+    }
+    
+    .nav-links a {
+        color: #667eea;
+        text-decoration: none;
+        font-weight: 500;
+        margin: 0 15px;
+        transition: color 0.2s;
+    }
+    
+    .nav-links a:hover {
+        color: #764ba2;
+        text-decoration: underline;
+    }
+    
+    .camera-path-panel {
+        background: #fff;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        margin-bottom: 24px;
+    }
+    
+    .camera-path-panel .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+    }
+    
+    .camera-path-panel h3 {
+        margin: 0;
+        font-size: 20px;
+    }
+    
+    .camera-path-panel p {
+        margin: 4px 0 0 0;
+        color: #6c757d;
+        font-size: 13px;
+    }
+    
+    .camera-path-panel .toggle-wrapper span {
+        font-size: 14px;
+    }
+
+    .route-summary {
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+    }
+
+    .route-stat {
+        background: #f8f9ff;
+        border-radius: 10px;
+        padding: 10px 14px;
+        min-width: 140px;
+    }
+
+    .route-stat-label {
+        font-size: 12px;
+        text-transform: uppercase;
+        color: #7c8db5;
+        font-weight: 600;
+        margin-bottom: 6px;
+        display: block;
+    }
+
+    .route-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    .cam-chip.active {
+        background: #e0f4ff;
+        color: #0c5460;
+        border: 1px solid rgba(12, 84, 96, 0.2);
+    }
+    
+    .camera-path-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .camera-path-table th,
+    .camera-path-table td {
+        padding: 10px 12px;
+        border-bottom: 1px solid #eee;
+        font-size: 13px;
+        vertical-align: top;
+    }
+    
+    .camera-path-table th {
+        text-transform: uppercase;
+        font-size: 12px;
+        color: #6c757d;
+    }
+    
+    .cam-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 16px;
+        font-size: 12px;
+        font-weight: 600;
+        background: #f0f4ff;
+        color: #4a4a4a;
+    }
+    
+    .cam-chip.start {
+        background: #e9f5e9;
+        color: #2f7a35;
+    }
+    
+    .cam-chip.current {
+        background: #ffeef0;
+        color: #b8324f;
+    }
+    
+    .neighbor-list {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    
+    .neighbor-item {
+        background: #f8f9fb;
+        border-radius: 8px;
+        padding: 6px 10px;
+        font-size: 12px;
+        border: 1px solid #e1e5ee;
+    }
+    
+    .neighbor-item .neighbor-direction {
+        font-weight: 600;
+        margin-right: 4px;
+        color: #6c63ff;
+    }
+    
+    .neighbor-item.current {
+        border-color: #ff6b81;
+        background: #fff0f3;
+    }
+    
+    .neighbor-item.start {
+        border-color: #51cf66;
+        background: #f4fff6;
+    }
+    
+    .neighbor-empty {
+        color: #aaa;
+        font-size: 12px;
+    }
+    
+    .hidden {
+        display: none !important;
+    }
+</style>
+
+<div class="logs-container">
+    <!-- 헤더 -->
+    <div class="logs-header">
+        <h2>📋 차량 추적 로그</h2>
+        <p>실시간으로 차량 추적 이벤트를 확인하세요</p>
+    </div>
+    
+    <!-- 자동 새로고침 표시 -->
+    <div class="auto-refresh">
+        <div class="refresh-indicator" id="refresh-indicator"></div>
+        <span id="auto-refresh-status">자동 새로고침 꺼짐</span>
+        <label class="toggle-wrapper">
+            <input type="checkbox" id="auto-refresh-toggle">
+            <span>자동 새로고침</span>
+        </label>
+        <button class="refresh-btn" type="button" onclick="updateLogs(true)">🔄 수동 새로고침</button>
+    </div>
+    
+    <div class="camera-path-panel">
+        <div class="panel-header">
+            <div>
+                <h3>카메라 위치 요약</h3>
+                <p>cctv_graph_connections.json 정보를 참조하여 시작/현재 위치와 주변 카메라를 확인합니다.</p>
+            </div>
+            <label class="toggle-wrapper">
+                <input type="checkbox" id="camera-path-toggle" checked>
+                <span>표시</span>
+            </label>
+        </div>
+        <div id="camera-path-content">
+            <div class="route-summary">
+                <div class="route-stat">
+                    <span class="route-stat-label">Start</span>
+                    {% if camera_route.start_camera %}
+                        <span class="cam-chip start" id="camera-route-start">{{ camera_route.start_camera }}</span>
+                    {% else %}
+                        <span class="neighbor-empty" id="camera-route-start">-</span>
+                    {% endif %}
+                </div>
+                <div class="route-stat">
+                    <span class="route-stat-label">Current</span>
+                    {% if camera_route.current_camera %}
+                        <span class="cam-chip current" id="camera-route-current">{{ camera_route.current_camera }}</span>
+                    {% else %}
+                        <span class="neighbor-empty" id="camera-route-current">-</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="route-chips" id="camera-route-chips">
+                {% if camera_route.route %}
+                    {% for cam in camera_route.route %}
+                        {% set chip_class = '' %}
+                        {% if loop.first %}
+                            {% set chip_class = chip_class + ' start' %}
+                        {% endif %}
+                        {% if loop.last %}
+                            {% set chip_class = chip_class + ' current' %}
+                        {% endif %}
+                        {% if camera_route.tri_active_cameras and cam in camera_route.tri_active_cameras %}
+                            {% set chip_class = chip_class + ' active' %}
+                        {% endif %}
+                        <span class="cam-chip{{ chip_class }}">{{ cam }}</span>
+                    {% endfor %}
+                {% else %}
+                    <span class="neighbor-empty" id="camera-route-empty">경로 정보가 없습니다.</span>
+                {% endif %}
+            </div>
+            <div class="neighbor-section">
+                <p style="margin-bottom: 6px; font-weight: 600;">주변 카메라</p>
+                <div class="neighbor-list" id="camera-neighbor-list">
+                    {% if camera_route.neighbors %}
+                        {% for neighbor in camera_route.neighbors %}
+                        <span class="neighbor-item">
+                            <span class="neighbor-direction">{{ neighbor.direction|upper }}</span>
+                            <span class="neighbor-camera">{{ neighbor.target }}</span>
+                        </span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="neighbor-empty">연결된 카메라 정보가 없습니다.</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 로그 테이블 -->
+    <div class="logs-table-wrapper">
+        <table class="logs-table">
+            <thead>
+                <tr>
+                    <th style="width: 180px;">시간</th>
+                    <th style="width: 100px;">이벤트</th>
+                    <th style="width: 250px;">카메라</th>
+                    <th style="width: 80px;">차량 ID</th>
+                    <th style="width: 100px;">신뢰도</th>
+                    <th>메시지</th>
+                </tr>
+            </thead>
+            <tbody id="logs-tbody">
+                {% if logs %}
+                    {% for log in logs %}
+                    {% set event_type = (log.event_type or 'INFO') %}
+                    {% set camera_name = log.camera or '-' %}
+                    {% set vehicle_id = log.vehicle_id or '-' %}
+                    {% set confidence = log.confidence or '-' %}
+                    {% set log_key = (log.timestamp|string) ~ '|' ~ vehicle_id ~ '|' ~ (log.message or '') %}
+                    <tr data-log-key="{{ log_key }}">
+                        <td>{{ log.timestamp }}</td>
+                        <td>
+                            <span class="event-badge {{ event_type|lower }}">
+                                {{ event_type }}
+                            </span>
+                        </td>
+                        <td>{{ camera_name }}</td>
+                        <td><span class="vehicle-id">{{ vehicle_id }}</span></td>
+                        <td>
+                            {% if 'HIGH' in confidence %}
+                                <span class="confidence high">{{ confidence }}</span>
+                            {% elif 'MEDIUM' in confidence %}
+                                <span class="confidence medium">{{ confidence }}</span>
+                            {% elif 'LOW' in confidence %}
+                                <span class="confidence low">{{ confidence }}</span>
+                            {% else %}
+                                <span class="confidence">{{ confidence }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="log-message">{{ log.message or '' }}</td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr id="logs-empty-state">
+                        <td colspan="6" class="empty-state">
+                            <i>📭</i>
+                            <p>표시할 로그가 없습니다.</p>
+                            <p style="font-size: 12px; color: #bbb;">차량을 선택하면 추적 로그가 여기에 표시됩니다.</p>
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- 네비게이션 -->
+    <div class="nav-links">
+        <a href="{{ url_for('cctv_select') }}">🔙 카메라 목록으로</a>
+        <a href="#" onclick="location.reload(); return false;">🔄 새로고침</a>
+    </div>
+</div>
+
+<script>
+// ===== 자동 로그 업데이트 =====
+const REFRESH_INTERVAL = 5000;
+const MAX_ROWS = 200;
+const logStore = new Set();
+let refreshTimer = null;
+const initialCameraRoute = {{ (camera_route or {})|tojson|safe }};
+
+function initLogStore() {
+    document.querySelectorAll('#logs-tbody tr[data-log-key]').forEach(row => {
+        logStore.add(row.dataset.logKey);
+    });
+}
+
+function buildLogKey(log) {
+    return [
+        log.timestamp || '',
+        log.vehicle_id || '',
+        log.message || ''
+    ].join('|');
+}
+
+function confidenceClassOf(confidence) {
+    if (!confidence) return '';
+    if (confidence.includes('HIGH')) return 'high';
+    if (confidence.includes('MEDIUM')) return 'medium';
+    if (confidence.includes('LOW')) return 'low';
+    return '';
+}
+
+function updateBadge(el, value, baseClass) {
+    if (!el) {
+        return;
+    }
+    if (value) {
+        el.className = `cam-chip ${baseClass}`;
+        el.textContent = value;
+    } else {
+        el.className = 'neighbor-empty';
+        el.textContent = '-';
+    }
+}
+
+function renderNeighborList(neighbors) {
+    const container = document.getElementById('camera-neighbor-list');
+    if (!container) return;
+    container.innerHTML = '';
+    if (!neighbors || neighbors.length === 0) {
+        const span = document.createElement('span');
+        span.className = 'neighbor-empty';
+        span.textContent = '연결된 카메라 정보가 없습니다.';
+        container.appendChild(span);
+        return;
+    }
+    neighbors.forEach((neighbor) => {
+        const item = document.createElement('span');
+        item.className = 'neighbor-item';
+        const dir = document.createElement('span');
+        dir.className = 'neighbor-direction';
+        dir.textContent = (neighbor.direction || '').toUpperCase();
+        const cam = document.createElement('span');
+        cam.className = 'neighbor-camera';
+        cam.textContent = neighbor.target || '-';
+        item.appendChild(dir);
+        item.appendChild(cam);
+        container.appendChild(item);
+    });
+}
+
+function renderCameraRoute(routeSummary) {
+    const summary = routeSummary || {};
+    updateBadge(document.getElementById('camera-route-start'), summary.start_camera, 'start');
+    updateBadge(document.getElementById('camera-route-current'), summary.current_camera, 'current');
+    
+    const chipsContainer = document.getElementById('camera-route-chips');
+    if (chipsContainer) {
+        chipsContainer.innerHTML = '';
+        const route = Array.isArray(summary.route) ? summary.route : [];
+        if (route.length === 0) {
+            const span = document.createElement('span');
+            span.className = 'neighbor-empty';
+            span.textContent = '경로 정보가 없습니다.';
+            chipsContainer.appendChild(span);
+        } else {
+            route.forEach((name, idx) => {
+                const chip = document.createElement('span');
+                chip.className = 'cam-chip';
+                if (idx === 0) chip.classList.add('start');
+                if (idx === route.length - 1) chip.classList.add('current');
+                if (Array.isArray(summary.tri_active_cameras) && summary.tri_active_cameras.includes(name)) {
+                    chip.classList.add('active');
+                }
+                chip.textContent = name;
+                chipsContainer.appendChild(chip);
+            });
+        }
+    }
+    renderNeighborList(summary.neighbors || []);
+}
+
+function renderLogRow(log, key) {
+    const eventType = (log.event_type || 'INFO').toUpperCase();
+    const camera = log.camera || '-';
+    const vehicleId = log.vehicle_id || '-';
+    const confidence = log.confidence || '-';
+    const confidenceClass = confidenceClassOf(confidence);
+    
+    return `
+        <tr data-log-key="${key}">
+            <td>${log.timestamp}</td>
+            <td>
+                <span class="event-badge ${eventType.toLowerCase()}">
+                    ${eventType}
+                </span>
+            </td>
+            <td>${camera}</td>
+            <td><span class="vehicle-id">${vehicleId}</span></td>
+            <td><span class="confidence ${confidenceClass}">${confidence}</span></td>
+            <td class="log-message">${log.message || ''}</td>
+        </tr>
+    `;
+}
+
+function removeEmptyState() {
+    const emptyRow = document.getElementById('logs-empty-state');
+    if (emptyRow) {
+        emptyRow.remove();
+    }
+}
+
+function showEmptyStateIfNeeded() {
+    if (logStore.size > 0) {
+        return;
+    }
+    const tbody = document.getElementById('logs-tbody');
+    if (!document.getElementById('logs-empty-state')) {
+        tbody.innerHTML = `
+            <tr id="logs-empty-state">
+                <td colspan="6" class="empty-state">
+                    <i>📭</i>
+                    <p>표시할 로그가 없습니다.</p>
+                    <p style="font-size: 12px; color: #bbb;">차량을 선택하면 추적 로그가 여기에 표시됩니다.</p>
+                </td>
+            </tr>
+        `;
+    }
+}
+
+function trimRows() {
+    const tbody = document.getElementById('logs-tbody');
+    let rows = tbody.querySelectorAll('tr[data-log-key]');
+    while (rows.length > MAX_ROWS) {
+        const lastRow = rows[rows.length - 1];
+        const key = lastRow.dataset.logKey;
+        logStore.delete(key);
+        lastRow.remove();
+        rows = tbody.querySelectorAll('tr[data-log-key]');
+    }
+}
+
+function appendLogs(logs) {
+    if (!logs || logs.length === 0) {
+        showEmptyStateIfNeeded();
+        return;
+    }
+    
+    const tbody = document.getElementById('logs-tbody');
+    removeEmptyState();
+    
+    for (let i = logs.length - 1; i >= 0; i--) {
+        const log = logs[i];
+        const key = buildLogKey(log);
+        if (logStore.has(key)) {
+            continue;
+        }
+        logStore.add(key);
+        tbody.insertAdjacentHTML('afterbegin', renderLogRow(log, key));
+    }
+    
+    trimRows();
+}
+
+function updateLogs(showToast = false) {
+    fetch('/api/logs')
+    .then(r => r.json())
+    .then(data => {
+        appendLogs(data.logs || []);
+        if (data.camera_route) {
+            renderCameraRoute(data.camera_route);
+        }
+        if (showToast) {
+            console.log('✅ 수동 새로고침 완료');
+        }
+    })
+    .catch(err => {
+        console.error('❌ 로그 업데이트 실패:', err);
+    });
+}
+
+function setAutoRefresh(enabled) {
+    const indicator = document.getElementById('refresh-indicator');
+    const status = document.getElementById('auto-refresh-status');
+    
+    if (refreshTimer) {
+        clearInterval(refreshTimer);
+        refreshTimer = null;
+    }
+    
+    if (enabled) {
+        refreshTimer = setInterval(() => updateLogs(), REFRESH_INTERVAL);
+        status.textContent = `자동 새로고침 켜짐 (${REFRESH_INTERVAL / 1000}초 간격)`;
+        indicator.classList.add('active');
+    } else {
+        status.textContent = '자동 새로고침 꺼짐';
+        indicator.classList.remove('active');
+    }
+}
+
+document.getElementById('auto-refresh-toggle').addEventListener('change', (e) => {
+    setAutoRefresh(e.target.checked);
+    if (e.target.checked) {
+        updateLogs();
+    }
+});
+
+initLogStore();
+renderCameraRoute(initialCameraRoute);
+updateLogs();
+
+const cameraPathToggle = document.getElementById('camera-path-toggle');
+if (cameraPathToggle) {
+    const cameraContent = document.getElementById('camera-path-content');
+    cameraPathToggle.addEventListener('change', (e) => {
+        if (!cameraContent) return;
+        cameraContent.classList.toggle('hidden', !e.target.checked);
+    });
+}
+
+console.log('📋 로그 페이지 로드 완료');
+console.log('🔄 자동 새로고침은 토글로 제어됩니다.');
+</script>
+
+{% endblock %}

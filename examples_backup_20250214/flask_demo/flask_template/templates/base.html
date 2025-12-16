@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title or "CCTV Demo" }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="{{ url_for('static', filename='site.css') }}" rel="stylesheet">
+</head>
+<body>
+  <nav class="nav">
+    <div class="container">
+      <a href="{{ url_for('cctv_select') }}">전국 실시간 교통상황</a>
+      <a href="{{ url_for('logs') }}"></a>
+      {% if current_user.is_authenticated %}
+        <span class="spacer"></span>
+        <span>{{ current_user.username }}</span>
+        <a href="{{ url_for('logout') }}">로그아웃</a>
+      {% endif %}
+    </div>
+  </nav>
+
+  <main class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul class="flash">
+          {% for cat, msg in messages %}
+            <li class="flash-{{ cat }}">{{ msg }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

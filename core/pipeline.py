@@ -1,4 +1,4 @@
-# core/pipeline.py
+﻿# core/pipeline.py
 #실행 루프
 # 패치내역. 3캠화면 욜로 한번에 적용
 import cv2
@@ -36,19 +36,42 @@ from core.history import TrackHistory
 import os, re
 from pathlib import Path
 
+from core.web_util import setup_web_integration, get_web_key, get_web_click, update_web_stats
+from core.pipeline_components.logging_utils import log_vehicle_tracking
+from core.pipeline_components.match_utils import (
+    ConsecutiveMatchValidator,
+    evaluate_match_confidence,
+)
+from core.pipeline_components.selection import SelectionHandler
 
 
 def _sanitize(name: str) -> str:
     return re.sub(r'[\\/:*?"<>|]+', '_', str(name)).strip()
 
 
+def _confidence_to_red(conf):
+    """
+    Normalize tracker confidence (0~1) to a red intensity for the selected box.
+    """
+    if conf is None:
+        return (0, 0, 200)
+    try:
+        value = float(conf)
+    except (TypeError, ValueError):
+        value = 0.0
+    value = max(0.0, min(value, 1.0))
+    base = 120  # 최소 밝기
+    red = int(base + value * (255 - base))
+    return (0, 0, min(red, 255))
+ 
+
 
 
 
 
 # 동일 카메라(= 같은 화면/세그먼트)일 때 / 다른 카메라일 때
-REID_THRESH_SAME  = 0.40   # 동일 카메라: 엄격
-REID_THRESH_OTHER = 0.50   # 다른 카메라: 관대 (야간은 0.55)
+REID_THRESH_SAME  = 0.55   # 동일 카메라: 여유 있게
+REID_THRESH_OTHER = 0.8 #80   # 다른 카메라: 로그 분석 기반 최적값
 
 
 WIN = "Capstone - CCTV Tracking"
@@ -58,10 +81,13 @@ tri_selected = {"seg": "C", "id": None}  # seg in {"L","C","R"}
 tri_selected = {"seg": "C", "id": None}  # seg in {"L","C","R"}
 
 tri_prepare = False  # 단일 모드로 시작
+tracking_session_id = None  # 현재 추적 세션 ID
+tracking_started_time = None  # 추적 시작 시간
 tracker = None
 tracks = []
 tracks_L, tracks_C, tracks_R = [], [], []
 
+#409 459 501
 
 def install_tri_selector(win_name, get_scale, get_seg_w, get_disp_img,
                          get_tracks_L, get_tracks_C, get_tracks_R):
@@ -102,16 +128,29 @@ def install_tri_selector(win_name, get_scale, get_seg_w, get_disp_img,
             print(f"[SELECT] tri {seg} -> ID {best[0]}")
     cv2.setMouseCallback(win_name, on_mouse)
    
+
 def run_detect():
+    
+    
+    try:
+        from app import pipeline_state
+        setup_web_integration(pipeline_state)
+    except ImportError:
+        print("[WARN] 웹 통합 없이 실행됨 (독립 실행 모드)")
+    
     cfg = load_config()
-    global tri_prepare, tracker, tracks, tracks_L, tracks_C, tracks_R, tri_ui_state, selected_bank, track_history_C, track_history_L, track_history_R, switcher, scale
     tri_prepare = False
+    tracks = []
+    tracks_L, tracks_C, tracks_R = [], [], []
     selected_bank = ReIDBank(maxlen=5, h_bins=25, s_bins=30)
     
     # ✅ 히스토리 버퍼 초기화 (카메라별로 분리)
     track_history_C = TrackHistory(maxlen=30)  # 중앙
     track_history_L = TrackHistory(maxlen=30)  # 좌측
-    track_history_R = TrackHistory(maxlen=30)  # 우측
+    track_history_R = TrackHistory(maxlen=30)
+    
+    # ✅ 연속 매칭 검증기 초기화
+    match_validator = ConsecutiveMatchValidator(required_count=3)  # 우측
     
     HISTORY_CLEANUP_EVERY = 100  # 100프레임마다 정리
     
@@ -134,7 +173,7 @@ def run_detect():
 
 
     switcher = SwitchController(current_name, current_url, api_key=cfg["ITS_API_KEY"],
-                                graph_path="data/cctv_graph_connections.json",
+                                graph_path="config/cctv_graph_connections.json",
                                 list_path="data/cctv_list_4.json", env_path=".env") 
     switcher.attach_center_manager(sm)
 
@@ -160,21 +199,32 @@ def run_detect():
         model_path="yolo11n.pt",
         conf_threshold=cfg["DET_CONF"],
         iou_threshold=cfg["TRACKER_IOU_TH"],
-        tracker_config="bytetrack.yaml"
+        tracker_config="detectors/bytetrack.yaml"
     )
 
     tracker_L = YOLOTracker(
         model_path="yolo11n.pt",
         conf_threshold=cfg["DET_CONF"],
         iou_threshold=cfg["TRACKER_IOU_TH"],
-        tracker_config="bytetrack.yaml"
+        tracker_config="detectors/bytetrack.yaml"
     )
 
     tracker_R = YOLOTracker(
         model_path="yolo11n.pt",
         conf_threshold=cfg["DET_CONF"],
         iou_threshold=cfg["TRACKER_IOU_TH"],
-        tracker_config="bytetrack.yaml"
+        tracker_config="detectors/bytetrack.yaml"
+    )
+
+    selection_handler = SelectionHandler(
+        tracker=tracker,
+        selected_bank=selected_bank,
+        switcher=switcher,
+        track_history_center=track_history_C,
+        track_history_left=track_history_L,
+        track_history_right=track_history_R,
+        log_vehicle_tracking=log_vehicle_tracking,
+        update_web_stats=update_web_stats,
     )
 
     crop_saver = CropSaver(save_root="reid_crops", save_every=3, pad=2, print_interval_sec=1.0)
@@ -184,9 +234,11 @@ def run_detect():
     display_w, display_h = cfg["DISPLAY_W"], cfg["DISPLAY_H"]
     scale = 1.0
     frame_shape = [0,0]
+    selection_handler.update_state(scale=scale, tri_prepare=tri_prepare)
 
+    tri_ui_state = {}
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
-    cv2.setMouseCallback(WIN, mouse_callback)
+    cv2.setMouseCallback(WIN, selection_handler)
     # 마우스 콜백
     def get_shape(): return (frame_shape[0], frame_shape[1])
     def get_scale(): return scale
@@ -245,6 +297,24 @@ def run_detect():
         if now - last_time >= 1.0:
             fps = frame_count / (now - last_time)
             print(f"[DEBUG] FPS: {fps:.2f}")
+            
+            # ✅ 웹에 통계 전송
+            active_cameras = []
+            if tri_prepare:
+                for cam_name in (switcher.left_name, switcher.current_name, switcher.right_name):
+                    if cam_name:
+                        active_cameras.append(cam_name)
+            elif switcher.current_name:
+                active_cameras.append(switcher.current_name)
+            update_web_stats(
+                fps=fps,
+                total_tracks=len(tracks) if not tri_prepare else len(tracks_L) + len(tracks_C) + len(tracks_R),
+                selected_id=tracker.selected_id,
+                mode='tri' if tri_prepare else 'single',
+                current_camera=switcher.current_name,
+                tri_cameras=active_cameras,
+            )
+            
             frame_count = 0
             last_time = now
         
@@ -294,10 +364,12 @@ def run_detect():
                 cv2.putText(frame, f"{conf:.2f}", (int(x1), int(y1)-5),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (140, 140, 140), 1)
 
-            # Tracking 박스 (초록/빨강)
+            # Tracking 박스 (초록/신뢰도 기반 붉은색)
+            conf_map = getattr(tracker, "last_track_confidences", {}) or {}
             for tid, x1, y1, x2, y2 in tracks:
-                color = (0,0,255) if (tracker.selected_id is not None and tid == tracker.selected_id) else (0,255,0)
-                if tid == tracker.selected_id:
+                is_selected = (tracker.selected_id is not None and tid == tracker.selected_id)
+                color = _confidence_to_red(conf_map.get(tid)) if is_selected else (0,255,0)
+                if is_selected:
                     if frame_idx % collect_every == 0:
                         # 센터 원본 frame 기준으로 수집
                         if selected_bank.size() < 5:
@@ -324,8 +396,21 @@ def run_detect():
             disp = cv2.resize(frame, (int(W*scale), int(H*scale))) if scale != 1.0 else frame
 
         
-        k = cv2.waitKey(1) & 0xFF
+        selection_handler.update_state(
+            tri_prepare=tri_prepare,
+            tracks=tracks,
+            tracks_L=tracks_L,
+            tracks_C=tracks_C,
+            tracks_R=tracks_R,
+            scale=scale,
+            tracking_session_id=tracking_session_id,
+        )
+
+        k = get_web_key()
         
+        click = get_web_click()
+        if click:
+            selection_handler(cv2.EVENT_LBUTTONDOWN, click[0], click[1], 0, None)
         
         if k in (27, ord('q')):
             break
@@ -337,6 +422,9 @@ def run_detect():
                 switcher.ensure_neighbor_managers()
             # 다음 프레임에서 창 크기 재조정
             need_resize = True
+        elif k == ord('c'):
+            selection_handler.clear_selection()
+            print("[INFO] 선택 해제 요청 처리")
         else:
             switcher.on_key(k)
             crop_saver.new_camera(switcher.current_name, reset_counts=True)
@@ -414,59 +502,6 @@ def run_detect():
                     
                     
                     
-                    # === (보강) 초경량 특징 + 카메라 표준화 기반 재평가 =========================
-                    # 조건: 센터에서 선택ID의 현재 박스를 찾을 수 있을 때
-                    try:
-                        src_box = None
-                        for tid0, x1,y1,x2,y2 in tracks_C:
-                            if tid0 == tracker.selected_id:
-                                src_box = (x1,y1,x2,y2); break
-                        if src_box is not None:
-                            # 카메라 식별자(세그+카메라명) — 카메라별 통계를 분리하기 위함
-                            cam_src = f"C::{switcher.current_name}"
-                            fp_src, _ = build_fp(cf_s, src_box, cam_id=cam_src, bins=32, with_shape=True, do_whiten=True)
-
-                            # 후보들 전부 스캔해서 최고 점수로 재선택
-                            best2 = None   # (score, seg, tid, box, cos, bh)
-                            for seg_name, seg_frame, tracks_seg, cam_name in [
-                                ("L", lf_s, tracks_L, getattr(switcher, "left_name",  None)),
-                                ("C", cf_s, tracks_C, getattr(switcher, "current_name", None)),
-                                ("R", rf_s, tracks_R, getattr(switcher, "right_name", None)),
-                            ]:
-                                cam_tgt = f"{seg_name}::{cam_name}"
-                                for tid1, x1,y1,x2,y2 in tracks_seg:
-                                    box = (x1,y1,x2,y2)
-                                    fp_tgt, _ = build_fp(seg_frame, box, cam_id=cam_tgt, bins=32, with_shape=True, do_whiten=True)
-                                    if fp_tgt is None or fp_src is None: 
-                                        continue
-                                    cos = _cos(fp_src, fp_tgt)
-                                    bh  = _bhattacharyya(fp_src, fp_tgt)
-                                    # 종합 점수 (코사인↑, 바차차야↓)
-                                    score = 0.6*cos + 0.4*(1.0 - bh)
-                                    if (best2 is None) or (score > best2[0]):
-                                        best2 = (score, seg_name, tid1, box, cos, bh)
-
-                            if best2 is not None:
-                                score, seg2, tid2, box2, cos, bh = best2
-                                # 이중 게이트(보수적으로 시작): cos>=0.85 or bh<=0.25
-                                if (cos >= 0.85) or (bh <= 0.25):
-                                    # 최종 remap 반영 (보강판정이 원판정보보다 우선)
-                                    if seg2 == "L":      remap_left[tid2]   = tracker.selected_id
-                                    elif seg2 == "C":    remap_center[tid2] = tracker.selected_id
-                                    else:                remap_right[tid2]  = tracker.selected_id
-
-                                    cv2.putText(tri, f"[REFINE OK] {seg2} cos={cos:.2f} bh={bh:.2f} s={score:.2f}",
-                                                (10, 80), 0, 0.7, (0,255,0), 2)
-                                else:
-                                    cv2.putText(tri, f"[REFINE NO] cos={cos:.2f} bh={bh:.2f}",
-                                                (10, 80), 0, 0.7, (0,0,255), 2)
-
-                            # 통계 저장
-                            _CAMSTATS.save()
-                    except Exception as e:
-                        # 보강 모듈 실패해도 전체 파이프라인 영향 없게
-                        print("[REFINE ERROR]", e)
-                    # =======================================================================
 
                     
                     if best is not None:
@@ -477,23 +512,85 @@ def run_detect():
                         # (옵션) 카메라 이름까지 같을 때만 SAME로 하려면 origin_cam 비교도 추가
                         # same_cam = (getattr(selected_bank, "origin_cam", None) == getattr(switcher, "current_name", None)) if seg=="C" else False
                         same_screen = (origin_seg is not None and seg == origin_seg)
-                        thresh = get_adaptive_threshold(selected_bank, switcher.current_name)
+                        thresh = get_adaptive_threshold(selected_bank, seg, switcher.current_name)
 
-                        if dist <= thresh:
+                        # ✅ 연속 매칭 검증
+                        confirmed, status, count = match_validator.validate(tid, dist, thresh, frame_idx)
+                        
+                        if confirmed:
+                            # 3번 연속 통과 → 확정!
+                            confidence = evaluate_match_confidence(dist)
+                            context = f"{origin_seg or '?'}->{seg}"
+                            print(f"[MATCH ✅] x{count} d={dist:.3f} conf={confidence} [{context}]")
+                            
                             # 동일 차량 취급(remap)
                             if seg == "L":  
                                 remap_left[tid]   = tracker.selected_id
+                                
+                                # 매칭 로그 기록
+                                cam_from = getattr(selected_bank, "origin_cam", "?")
+                                cam_to = switcher.left_name
+                                log_vehicle_tracking(
+                                    session_id=tracking_session_id,
+                                    event_type="MATCH_FOUND",
+                                    data={
+                                        'cam_from': cam_from,
+                                        'cam_to': cam_to,
+                                        'tid_from': tracker.selected_id,
+                                        'tid_to': tid,
+                                        'distance': dist,
+                                        'confidence': confidence,
+                                        'segment': seg
+                                    }
+                                )
+                                
                                 tracker.selected_id = tid
                                 print(f"[SELECT UPDATE] tri L -> ID {tid}")
                             elif seg == "C":  
                                 remap_center[tid] = tracker.selected_id
+                                
+                                # 매칭 로그 기록
+                                cam_from = getattr(selected_bank, "origin_cam", "?")
+                                cam_to = switcher.current_name
+                                log_vehicle_tracking(
+                                    session_id=tracking_session_id,
+                                    event_type="MATCH_FOUND",
+                                    data={
+                                        'cam_from': cam_from,
+                                        'cam_to': cam_to,
+                                        'tid_from': tracker.selected_id,
+                                        'tid_to': tid,
+                                        'distance': dist,
+                                        'confidence': confidence,
+                                        'segment': seg
+                                    }
+                                )
+                                
                                 tracker.selected_id = tid
-                                print(f"[SELECT UPDATE] tri L -> ID {tid}")
+                                print(f"[SELECT UPDATE] tri C -> ID {tid}")
                                 
                             else:           
                                 remap_right[tid]  = tracker.selected_id
+                                
+                                # 매칭 로그 기록
+                                cam_from = getattr(selected_bank, "origin_cam", "?")
+                                cam_to = switcher.right_name
+                                log_vehicle_tracking(
+                                    session_id=tracking_session_id,
+                                    event_type="MATCH_FOUND",
+                                    data={
+                                        'cam_from': cam_from,
+                                        'cam_to': cam_to,
+                                        'tid_from': tracker.selected_id,
+                                        'tid_to': tid,
+                                        'distance': dist,
+                                        'confidence': confidence,
+                                        'segment': seg
+                                    }
+                                )
+                                
                                 tracker.selected_id = tid
-                                print(f"[SELECT UPDATE] tri L -> ID {tid}")
+                                print(f"[SELECT UPDATE] tri R -> ID {tid}")
                                 
 
                             cv2.putText(tri, f"match {seg} dm={dist:.3f} th={thresh:.2f} ({'same' if same_screen else 'other'})",
@@ -510,11 +607,18 @@ def run_detect():
                         X1, X2 = int(x1 + xoff), int(x2 + xoff)
                         cv2.rectangle(img, (X1, int(y1)), (X2, int(y2)), color, 1)
 
-                def draw_tracks_on_tri(img, tracks, xoff, selected_id=None, remap=None):
+                def draw_tracks_on_tri(img, tracks, xoff, selected_id=None, remap=None, confidence_map=None):
                     for tid, x1, y1, x2, y2 in tracks:
                         shown_id = remap.get(tid, tid) if remap else tid
-                        is_sel = (selected_id is not None and shown_id == selected_id)
-                        color = (0,0,255) if is_sel else (0,255,0)
+                        is_sel = (
+                            selected_id is not None
+                            and (shown_id == selected_id or tid == selected_id)
+                        )
+                        if is_sel:
+                            conf = confidence_map.get(tid) if confidence_map else None
+                            color = _confidence_to_red(conf)
+                        else:
+                            color = (0,255,0)
                         X1, X2 = int(x1 + xoff), int(x2 + xoff)
                         cv2.rectangle(img, (X1, int(y1)), (X2, int(y2)), color, 2)
                         cv2.putText(img, f"ID {shown_id}", (X1, int(y1)-10),
@@ -637,7 +741,9 @@ def run_detect():
                                                         for i,d in enumerate(per_band)])
                                     lines.append(f"{now_txt}  seg={seg_name}  tid={tid}  d_mean={d_mean:.4f}  {band_str}")
                             if lines:
-                                log_bhatta5(switcher.current_name, tracker.selected_id, lines)
+                                anchor_id = getattr(tracker, "selection_anchor_id", None) or tracker.selected_id
+                                if anchor_id is not None:
+                                    log_bhatta5(switcher.current_name, anchor_id, lines)
 
 
                 #
@@ -650,9 +756,30 @@ def run_detect():
                 draw_dets_on_tri(tri, dets_R, seg_w*2)'''
 
                 # (b) 추적 박스 (선택ID는 빨강)
-                draw_tracks_on_tri(tri, tracks_L, 0,       selected_id=tracker.selected_id, remap=remap_left)
-                draw_tracks_on_tri(tri, tracks_C, seg_w,   selected_id=tracker.selected_id, remap=remap_center)
-                draw_tracks_on_tri(tri, tracks_R, seg_w*2, selected_id=tracker.selected_id, remap=remap_right)
+                draw_tracks_on_tri(
+                    tri,
+                    tracks_L,
+                    0,
+                    selected_id=tracker.selected_id,
+                    remap=remap_left,
+                    confidence_map=getattr(tracker_L, "last_track_confidences", None),
+                )
+                draw_tracks_on_tri(
+                    tri,
+                    tracks_C,
+                    seg_w,
+                    selected_id=tracker.selected_id,
+                    remap=remap_center,
+                    confidence_map=getattr(tracker, "last_track_confidences", None),
+                )
+                draw_tracks_on_tri(
+                    tri,
+                    tracks_R,
+                    seg_w * 2,
+                    selected_id=tracker.selected_id,
+                    remap=remap_right,
+                    confidence_map=getattr(tracker_R, "last_track_confidences", None),
+                )
 
                 #print(lf_s.shape, cf_s.shape, rf_s.shape)
 
@@ -694,16 +821,13 @@ def run_detect():
             tri_disp = tri
             disp_w, disp_h = tri_w, tri_h
             ox, oy = 0, 0
-
-            # 마우스 콜백이 쓸 상태 저장
-            if 'tri_ui_state' not in globals():
-                tri_ui_state = {}
             tri_ui_state.update({
                 "orig_w": tri_w, "orig_h": tri_h,
                 "disp_w": disp_w, "disp_h": disp_h,
                 "offset_x": ox, "offset_y": oy,
                 "seg_w": seg_w,
             })
+            selection_handler.update_state(tri_ui_state=tri_ui_state)
 
             
         
@@ -731,7 +855,7 @@ def run_detect():
         if out_img is None:
             print("[WARN] out_img가 None입니다!")
             continue
-        cv2.imshow(WIN, out_img)
+        #cv2.imshow(WIN, out_img)
         if out_img is not None:
             BUS.publish(out_img)
         # === 필요할 때만 창 크기 자동 맞춤 ===
@@ -741,283 +865,10 @@ def run_detect():
 
 
     _CAMSTATS.save()
-    print("[INFO] cam_stats.json 저장 완료")
+    print("[INFO] cam_stats 저장 완료: config/cam_stats.json")
     sm.stop()
     cv2.destroyAllWindows()
 
-
-# ============================================================
-# ✅ 차량 선택용 마우스 콜백
-# ============================================================
-def find_closest_track_in_history(track_history, click_x, click_y, max_frames_back=15, max_distance=150):
-    """
-    최근 N 프레임의 히스토리에서 클릭 위치에 가장 가까운 트랙 찾기
-    
-    Args:
-        track_history: TrackHistory 객체
-        click_x, click_y: 클릭 좌표 (로컬 세그먼트 좌표)
-        max_frames_back: 최대 몇 프레임 전까지 검색할지 (기본 15)
-        max_distance: 최대 허용 거리 픽셀 (기본 150)
-    
-    Returns:
-        (track_id, distance, frame_count) or (None, None, 0)
-    """
-    if not hasattr(track_history, 'history') or not track_history.history:
-        return None, None, 0
-    
-    best_tid = None
-    best_distance = max_distance
-    best_frame_idx = -1
-    total_checked = 0
-    
-    # 모든 트랙의 최근 프레임 검색
-    for tid, frames in track_history.history.items():
-        if not frames or len(frames) == 0:
-            continue
-        
-        # 최근 max_frames_back 프레임만 검색 (deque이므로 끝에서부터)
-        recent_count = min(len(frames), max_frames_back)
-        recent_frames = list(frames)[-recent_count:]
-        
-        for crop, bbox, fidx in recent_frames:
-            total_checked += 1
-            x1, y1, x2, y2 = bbox
-            
-            # bbox 중심점 계산
-            cx = (x1 + x2) / 2
-            cy = (y1 + y2) / 2
-            
-            # 클릭 위치와의 유클리드 거리 계산
-            distance = np.sqrt((cx - click_x)**2 + (cy - click_y)**2)
-            
-            # 더 가까운 트랙 발견
-            if distance < best_distance:
-                best_distance = distance
-                best_tid = tid
-                best_frame_idx = fidx
-    
-    if best_tid is not None:
-        print(f"[HISTORY_MATCH] ✅ {total_checked}개 프레임 검색 → ID {best_tid} 발견 (거리: {best_distance:.1f}px, 프레임: {best_frame_idx})")
-        return best_tid, best_distance, total_checked
-    else:
-        print(f"[HISTORY_MATCH] ❌ {total_checked}개 프레임 검색했으나 {max_distance}px 이내 트랙 없음")
-        return None, None, total_checked
-
-
-def mouse_callback(event, x, y, flags, param):
-    """
-    개선된 마우스 콜백 - 히스토리 기반 트랙 검색 포함
-    
-    동작 순서:
-    1. 현재 프레임의 트랙에서 직접 히트 테스트 (bbox 내부 클릭)
-    2. 실패 시 최근 15프레임 히스토리에서 가장 가까운 트랙 검색
-    3. 성공 시 해당 트랙의 히스토리에서 갤러리 수집
-    """
-    global tri_prepare, tracker, tracks, tracks_L, tracks_C, tracks_R, tri_ui_state, selected_bank
-    global track_history_C, track_history_L, track_history_R, switcher
-
-    if event != cv2.EVENT_LBUTTONDOWN:
-        return
-
-    if tri_prepare:
-        # ============================================================
-        # Tri 모드 (3-화면 동시 표시)
-        # ============================================================
-        s = tri_ui_state if 'tri_ui_state' in globals() else None
-        if not s:
-            print("[Mouse] tri_ui_state 없음")
-            return
-
-        orig_w = s.get("orig_w", 0)
-        orig_h = s.get("orig_h", 0)
-        disp_w = s.get("disp_w", 0)
-        disp_h = s.get("disp_h", 0)
-        ox = s.get("offset_x", 0)
-        oy = s.get("offset_y", 0)
-        seg_w = s.get("seg_w", 0)
-
-        if orig_w <= 0 or disp_w <= 0 or seg_w <= 0:
-            print("[Mouse] tri state invalid")
-            return
-
-        # 1) 표시 좌표 → tri 원본 좌표 (레터박스 보정)
-        x_in = x - ox
-        y_in = y - oy
-        if not (0 <= x_in < disp_w and 0 <= y_in < disp_h):
-            print("[Mouse] 여백 클릭")
-            return
-
-        x_tri = int(x_in * orig_w / disp_w)
-        y_tri = int(y_in * orig_h / disp_h)
-
-        # 2) 세그먼트 판정 (L/C/R)
-        seg_idx = min(max(x_tri // seg_w, 0), 2)
-        clicked_seg = ("L", "C", "R")[seg_idx]
-        x_local = x_tri - seg_idx * seg_w
-        y_local = y_tri
-
-        print(f"[Mouse] tri click: seg={clicked_seg}, local=({x_local},{y_local}), tri=({x_tri},{y_tri})")
-
-        # 3) 현재 프레임에서 트랙 직접 히트 테스트
-        seg_tracks = {
-            "L": tracks_L if 'tracks_L' in globals() else [],
-            "C": tracks_C if 'tracks_C' in globals() else [],
-            "R": tracks_R if 'tracks_R' in globals() else []
-        }.get(clicked_seg, [])
-
-        clicked_id = None
-        
-        # 3-1) 현재 프레임에서 bbox 내부 클릭 체크
-        for tid, bx1, by1, bx2, by2 in seg_tracks:
-            if bx1 <= x_local <= bx2 and by1 <= y_local <= by2:
-                clicked_id = tid
-                print(f"[DIRECT_HIT] ✅ 현재 프레임에서 ID {tid} 직접 선택")
-                break
-        
-        # 3-2) ✅ 현재 프레임에서 못 찾으면 히스토리 검색
-        if clicked_id is None:
-            print(f"[HISTORY_SEARCH] 현재 프레임에 트랙 없음, 히스토리 검색 시작...")
-            
-            # 세그먼트에 맞는 히스토리와 카메라명 선택
-            if clicked_seg == "L":
-                history = track_history_L
-                cam_name = switcher.left_name
-            elif clicked_seg == "C":
-                history = track_history_C
-                cam_name = switcher.current_name
-            else:  # "R"
-                history = track_history_R
-                cam_name = switcher.right_name
-            
-            # 히스토리에서 가장 가까운 트랙 찾기
-            clicked_id, distance, checked = find_closest_track_in_history(
-                history, x_local, y_local,
-                max_frames_back=15,  # 최근 15프레임 (0.5초)
-                max_distance=150     # 150픽셀 이내
-            )
-
-        # 4) 선택 처리
-        if clicked_id is not None:
-            tracker.selected_id = clicked_id
-            print(f"[INFO] 🎯 tri 모드 차량 선택됨: seg={clicked_seg}, ID={clicked_id}")
-            
-            # 히스토리 및 카메라명 결정
-            if clicked_seg == "L":
-                history = track_history_L
-                cam_name = switcher.left_name
-            elif clicked_seg == "C":
-                history = track_history_C
-                cam_name = switcher.current_name
-            else:  # "R"
-                history = track_history_R
-                cam_name = switcher.right_name
-            
-            # 히스토리에서 갤러리 수집
-            collected = 0
-            target = selected_bank.items_band5.maxlen
-            
-            history_frames = history.get_history(clicked_id)
-            print(f"[HISTORY] 📦 {len(history_frames)}개 프레임 발견, {target}장 수집 시도...")
-            
-            for crop, bbox, fidx in reversed(history_frames):  # 최근부터
-                if collected >= target:
-                    break
-                
-                h, w = crop.shape[:2]
-                added = selected_bank.add_from_frame_banded5_improved(
-                    crop, (0, 0, w, h),  # crop 전체
-                    origin_seg=clicked_seg,
-                    origin_cam=cam_name,
-                    cam_id=cam_name,
-                    use_whitening=True
-                )
-                
-                if added:
-                    collected += 1
-            
-            if collected > 0:
-                print(f"[HISTORY] ✅ {collected}/{target}장 수집 완료")
-            else:
-                print(f"[HISTORY] ⚠️  히스토리 수집 실패, 실시간 수집 시작")
-            
-        else:
-            # 선택 해제
-            tracker.selected_id = None
-            selected_bank.clear()
-            print("[INFO] ❌ tri 모드 클릭 영역 내 차량 없음 (현재+히스토리)")
-
-    else:
-        # ============================================================
-        # 단일 모드 (중앙 화면만 표시)
-        # ============================================================
-        # ✅ 스케일 보정: 표시 좌표 → 원본 좌표
-        try:
-            current_scale = scale if scale > 0 else 1.0
-        except:
-            current_scale = 1.0
-        
-        orig_x = int(x / current_scale)
-        orig_y = int(y / current_scale)
-        
-        print(f"[Mouse] 클릭: 표시=({x},{y}), 원본=({orig_x},{orig_y}), scale={current_scale:.3f}")
-        
-        clicked_id = None
-        
-        # 1) 현재 프레임에서 직접 히트 테스트
-        for tid, bx1, by1, bx2, by2 in tracks:
-            if bx1 <= orig_x <= bx2 and by1 <= orig_y <= by2:
-                clicked_id = tid
-                print(f"[DIRECT_HIT] ✅ ID {tid} 선택 (bbox={bx1},{by1},{bx2},{by2})")
-                break
-        
-        # 2) ✅ 현재 프레임에서 못 찾으면 히스토리 검색
-        if clicked_id is None:
-            print(f"[HISTORY_SEARCH] 현재 프레임에 트랙 없음, 히스토리 검색 시작...")
-            
-            clicked_id, distance, checked = find_closest_track_in_history(
-                track_history_C, orig_x, orig_y,
-                max_frames_back=15,
-                max_distance=150
-            )
-
-        # 3) 선택 처리
-        if clicked_id is not None:
-            tracker.selected_id = clicked_id
-            print(f"[INFO] 🎯 차량 선택됨 (ID={clicked_id}) - 다음 프레임부터 빨간 박스로 표시됩니다")
-            
-            # 히스토리에서 갤러리 수집
-            history_frames = track_history_C.get_history(clicked_id)
-            collected = 0
-            target = selected_bank.items_band5.maxlen
-            
-            print(f"[HISTORY] 📦 {len(history_frames)}개 프레임 발견, {target}장 수집 시도...")
-            
-            for crop, bbox, fidx in reversed(history_frames):
-                if collected >= target:
-                    break
-                
-                h, w = crop.shape[:2]
-                if selected_bank.add_from_frame_banded5_improved(
-                    crop, (0, 0, w, h),
-                    origin_seg="C",
-                    origin_cam=switcher.current_name,
-                    cam_id=switcher.current_name,
-                    use_whitening=True
-                ):
-                    collected += 1
-            
-            if collected > 0:
-                print(f"[HISTORY] ✅ {collected}/{target}장 수집 완료")
-            else:
-                print(f"[HISTORY] ⚠️  히스토리 수집 실패, 실시간 수집 시작")
-            
-        else:
-            # 선택 해제
-            selected_bank.clear()
-            tracker.selected_id = None
-            print("[INFO] ❌ 클릭 영역 내 차량 없음 (현재+히스토리)")
-
-#
 
 def bhatta_dist_for_box(bank, frame, box):
     """5밴드 우선 사용"""
@@ -1042,26 +893,22 @@ def bhatta_dist_for_box(bank, frame, box):
     return None
 
 
-def get_adaptive_threshold(selected_bank, current_cam, frame_brightness=None):
-    """
-    선택 차량의 origin_cam과 현재 카메라/밝기를 고려한 임계값 반환
-    """
-    # 기본값
-    same_thresh = 0.40
-    other_thresh = 0.50
+def get_adaptive_threshold(selected_bank, current_seg, current_cam=None, frame_brightness=None):
+    """세그먼트별 임계값: L->L=0.50(엄격), L->C=0.70(관대)"""
+    same_seg_thresh = 0.50
+    other_seg_thresh = REID_THRESH_OTHER
     
-    # 야간 보정 (선택적)
     if frame_brightness is not None and frame_brightness < 100:
-        other_thresh = 0.55  # 야간에는 더 관대하게
+        other_seg_thresh += 0.05
     
-    # origin_cam 확인
-    if not hasattr(selected_bank, 'origin_cam') or selected_bank.origin_cam is None:
-        return same_thresh  # 첫 포착: 엄격
+    origin_seg = getattr(selected_bank, "origin_seg", None)
+    if origin_seg is None:
+        return same_seg_thresh
     
-    if selected_bank.origin_cam == current_cam:
-        return same_thresh
+    if origin_seg == current_seg:
+        return same_seg_thresh
     else:
-        return other_thresh
+        return other_seg_thresh
 
 #
 

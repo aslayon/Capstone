@@ -1,0 +1,382 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    /* 로그 페이지 스타일 */
+    .logs-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 20px;
+    }
+    
+    .logs-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 30px;
+        border-radius: 12px;
+        margin-bottom: 30px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    
+    .logs-header h2 {
+        margin: 0 0 10px 0;
+        font-size: 28px;
+    }
+    
+    .logs-header p {
+        margin: 0;
+        opacity: 0.9;
+    }
+    
+    /* 필터 섹션 */
+    .filters {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        display: flex;
+        gap: 15px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    
+    .filters label {
+        font-weight: 500;
+        color: #555;
+    }
+    
+    .filters select {
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        font-size: 14px;
+        background: white;
+    }
+    
+    .filters button {
+        padding: 8px 20px;
+        background: #667eea;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: background 0.2s;
+    }
+    
+    .filters button:hover {
+        background: #764ba2;
+    }
+    
+    /* 로그 테이블 */
+    .logs-table-wrapper {
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        overflow: hidden;
+    }
+    
+    .logs-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    
+    .logs-table thead {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+    }
+    
+    .logs-table th {
+        padding: 15px;
+        text-align: left;
+        font-weight: 600;
+        font-size: 14px;
+    }
+    
+    .logs-table tbody tr {
+        border-bottom: 1px solid #eee;
+        transition: background 0.2s;
+    }
+    
+    .logs-table tbody tr:hover {
+        background: #f8f9fa;
+    }
+    
+    .logs-table tbody tr:last-child {
+        border-bottom: none;
+    }
+    
+    .logs-table td {
+        padding: 12px 15px;
+        font-size: 13px;
+    }
+    
+    /* 이벤트 타입 뱃지 */
+    .event-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    
+    .event-badge.start {
+        background: #4CAF50;
+        color: white;
+    }
+    
+    .event-badge.match {
+        background: #2196F3;
+        color: white;
+    }
+    
+    .event-badge.switch {
+        background: #FF9800;
+        color: white;
+    }
+    
+    .event-badge.info {
+        background: #9E9E9E;
+        color: white;
+    }
+    
+    /* 차량 ID 강조 */
+    .vehicle-id {
+        font-weight: 600;
+        color: #667eea;
+        font-family: 'Courier New', monospace;
+    }
+    
+    /* 신뢰도 표시 */
+    .confidence {
+        font-weight: 500;
+        font-family: 'Courier New', monospace;
+    }
+    
+    .confidence.high {
+        color: #4CAF50;
+    }
+    
+    .confidence.medium {
+        color: #FF9800;
+    }
+    
+    .confidence.low {
+        color: #f44336;
+    }
+    
+    /* 로그 메시지 */
+    .log-message {
+        color: #555;
+        line-height: 1.4;
+    }
+    
+    /* 빈 상태 */
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: #999;
+    }
+    
+    .empty-state i {
+        font-size: 48px;
+        margin-bottom: 15px;
+        display: block;
+    }
+    
+    /* 자동 새로고침 표시 */
+    .auto-refresh {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px;
+        background: #e8f5e9;
+        border-radius: 6px;
+        font-size: 13px;
+        color: #2e7d32;
+    }
+    
+    .refresh-indicator {
+        width: 10px;
+        height: 10px;
+        background: #4CAF50;
+        border-radius: 50%;
+        animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+        0%, 100% {
+            opacity: 1;
+        }
+        50% {
+            opacity: 0.3;
+        }
+    }
+    
+    /* 네비게이션 */
+    .nav-links {
+        margin-top: 20px;
+        text-align: center;
+    }
+    
+    .nav-links a {
+        color: #667eea;
+        text-decoration: none;
+        font-weight: 500;
+        margin: 0 15px;
+        transition: color 0.2s;
+    }
+    
+    .nav-links a:hover {
+        color: #764ba2;
+        text-decoration: underline;
+    }
+</style>
+
+<div class="logs-container">
+    <!-- 헤더 -->
+    <div class="logs-header">
+        <h2>📋 차량 추적 로그</h2>
+        <p>실시간으로 차량 추적 이벤트를 확인하세요</p>
+    </div>
+    
+    <!-- 자동 새로고침 표시 -->
+    <div class="auto-refresh">
+        <div class="refresh-indicator"></div>
+        <span>자동 새로고침 활성화 (5초마다)</span>
+    </div>
+    
+    <!-- 로그 테이블 -->
+    <div class="logs-table-wrapper">
+        <table class="logs-table">
+            <thead>
+                <tr>
+                    <th style="width: 180px;">시간</th>
+                    <th style="width: 100px;">이벤트</th>
+                    <th style="width: 250px;">카메라</th>
+                    <th style="width: 80px;">차량 ID</th>
+                    <th style="width: 100px;">신뢰도</th>
+                    <th>메시지</th>
+                </tr>
+            </thead>
+            <tbody id="logs-tbody">
+                {% if logs %}
+                    {% for log in logs %}
+                    {% set event_type = (log.event_type or 'INFO') %}
+                    {% set camera_name = log.camera or '-' %}
+                    {% set vehicle_id = log.vehicle_id or '-' %}
+                    {% set confidence = log.confidence or '-' %}
+                    <tr>
+                        <td>{{ log.timestamp }}</td>
+                        <td>
+                            <span class="event-badge {{ event_type|lower }}">
+                                {{ event_type }}
+                            </span>
+                        </td>
+                        <td>{{ camera_name }}</td>
+                        <td><span class="vehicle-id">{{ vehicle_id }}</span></td>
+                        <td>
+                            {% if 'HIGH' in confidence %}
+                                <span class="confidence high">{{ confidence }}</span>
+                            {% elif 'MEDIUM' in confidence %}
+                                <span class="confidence medium">{{ confidence }}</span>
+                            {% elif 'LOW' in confidence %}
+                                <span class="confidence low">{{ confidence }}</span>
+                            {% else %}
+                                <span class="confidence">{{ confidence }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="log-message">{{ log.message or '' }}</td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="6" class="empty-state">
+                            <i>📭</i>
+                            <p>표시할 로그가 없습니다.</p>
+                            <p style="font-size: 12px; color: #bbb;">차량을 선택하면 추적 로그가 여기에 표시됩니다.</p>
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- 네비게이션 -->
+    <div class="nav-links">
+        <a href="{{ url_for('cctv_select') }}">🔙 카메라 목록으로</a>
+        <a href="#" onclick="location.reload(); return false;">🔄 새로고침</a>
+    </div>
+</div>
+
+<script>
+// ===== 자동 로그 업데이트 =====
+function updateLogs() {
+    fetch('/api/logs')
+    .then(r => r.json())
+    .then(data => {
+        const tbody = document.getElementById('logs-tbody');
+        
+        if (!data.logs || data.logs.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="empty-state">
+                        <i>📭</i>
+                        <p>표시할 로그가 없습니다.</p>
+                        <p style="font-size: 12px; color: #bbb;">차량을 선택하면 추적 로그가 여기에 표시됩니다.</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        // 로그 HTML 생성
+        let html = '';
+        data.logs.forEach(log => {
+            const eventType = (log.event_type || 'INFO').toUpperCase();
+            const camera = log.camera || '-';
+            const vehicleId = log.vehicle_id || '-';
+            const confidence = log.confidence || '-';
+
+            let confidenceClass = '';
+            if (confidence.includes('HIGH')) {
+                confidenceClass = 'high';
+            } else if (confidence.includes('MEDIUM')) {
+                confidenceClass = 'medium';
+            } else if (confidence.includes('LOW')) {
+                confidenceClass = 'low';
+            }
+            
+            html += `
+                <tr>
+                    <td>${log.timestamp}</td>
+                    <td>
+                        <span class="event-badge ${eventType.toLowerCase()}">
+                            ${eventType}
+                        </span>
+                    </td>
+                    <td>${camera}</td>
+                    <td><span class="vehicle-id">${vehicleId}</span></td>
+                    <td><span class="confidence ${confidenceClass}">${confidence}</span></td>
+                    <td class="log-message">${log.message || ''}</td>
+                </tr>
+            `;
+        });
+        
+        tbody.innerHTML = html;
+    })
+    .catch(err => {
+        console.error('❌ 로그 업데이트 실패:', err);
+    });
+}
+
+// 5초마다 자동 업데이트
+setInterval(updateLogs, 5000);
+updateLogs();
+
+console.log('📋 로그 페이지 로드 완료');
+console.log('🔄 자동 새로고침 활성화 (5초마다)');
+</script>
+
+{% endblock %}
